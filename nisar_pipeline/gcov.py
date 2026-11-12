@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import json
 import logging
-import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 import numpy as np
 import rasterio
@@ -215,7 +214,6 @@ def align_windows(
     """
     validate_same_geometry(pre, post)
 
-    # Intersect 1D coordinate arrays by rounding to 0.01 m to avoid float jitter
     pre_x_r = np.round(pre.x, 2)
     post_x_r = np.round(post.x, 2)
     common_x, ix_pre, ix_post = np.intersect1d(
@@ -231,7 +229,6 @@ def align_windows(
     if len(common_x) == 0 or len(common_y) == 0:
         raise RuntimeError("Pre and post windows have zero overlapping UTM coordinates.")
 
-    # Preserve original Y ordering (typically North-to-South descending in UTM)
     if pre.y[0] > pre.y[-1]:
         order_y = np.argsort(pre.y[iy_pre])[::-1]
     else:
@@ -243,12 +240,8 @@ def align_windows(
     ix_pre = ix_pre[order_x]
     ix_post = ix_post[order_x]
 
-    pre_aligned = {
-        k: v[np.ix_(iy_pre, ix_pre)] for k, v in pre.pols.items()
-    }
-    post_aligned = {
-        k: v[np.ix_(iy_post, ix_post)] for k, v in post.pols.items()
-    }
+    pre_aligned = {k: v[np.ix_(iy_pre, ix_pre)] for k, v in pre.pols.items()}
+    post_aligned = {k: v[np.ix_(iy_post, ix_post)] for k, v in post.pols.items()}
     return pre_aligned, post_aligned, pre.x[ix_pre], pre.y[iy_pre]
 
 
@@ -396,8 +389,6 @@ def append_to_zarr_stack(
     """
     zarr_path.parent.mkdir(parents=True, exist_ok=True)
     data, x_c, y_c, _ = compute_affine_and_orient(arr, x, y)
-
-    # Use object dtype for string time coordinates so both Zarr v2 and Zarr v3 accept it
     time_coord = np.array([str(date_str)], dtype=object)
 
     ds_new = xr.Dataset(
@@ -416,9 +407,9 @@ def append_to_zarr_stack(
     )
 
     if not zarr_path.exists():
-        ds_new.to_zarr(zarr_path, mode="w")
+        ds_new.to_zarr(zarr_path, mode="w", consolidated=False)
     else:
-        existing = xr.open_zarr(zarr_path)
+        existing = xr.open_zarr(zarr_path, consolidated=False)
         existing_times = [str(t) for t in existing["time"].values.tolist()]
         if str(date_str) in existing_times:
             logger.info(
@@ -431,7 +422,9 @@ def append_to_zarr_stack(
             method="nearest",
             tolerance=50.0,
         )
-        ds_aligned.to_zarr(zarr_path, mode="a", append_dim="time")
+        ds_aligned.to_zarr(
+            zarr_path, mode="a", append_dim="time", consolidated=False
+        )
 
     return zarr_path
 

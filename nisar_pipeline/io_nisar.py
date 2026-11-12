@@ -24,11 +24,20 @@ from nisar_pipeline.layers import IDENTIFICATION_GROUP
 
 logger = logging.getLogger(__name__)
 
-# Matches NISAR tail pattern e.g. ..._R04000_001.h5 or ..._P03100_002.h5
+# Matches both standard live NISAR tails (..._P05023_N_F_J_001.h5)
+# and short tails (..._R04000_002.h5)
 _VERSION_RE = re.compile(
-    r"_(?P<stage>[PR])(?P<crid>\d{5})_(?P<counter>\d{2,3})(?:\.h5)?$",
+    r"_(?P<stage>[PRX])(?P<crid>\d{5})(?:_[A-Z0-9])+?_(?P<counter>\d{2,3})(?:\.h5)?$"
+    r"|_(?P<stage_short>[PRX])(?P<crid_short>\d{5})_(?P<counter_short>\d{2,3})(?:\.h5)?$",
     re.IGNORECASE,
 )
+
+# Operational ('R') > Provisional ('P') > Experimental/CalVal ('X')
+_STAGE_RANK: Dict[str, int] = {"X": 1, "P": 2, "R": 3}
+
+
+class UnsupportedGranuleError(RuntimeError):
+    """Raised when a granule is structurally incompatible and should not be retried."""
 
 
 @dataclass(frozen=True)
@@ -43,7 +52,7 @@ class GranuleRecord:
     file_name: str
     url: str
     version_tag: str
-    version_sort_key: Tuple[int, int, int, str]
+    version_sort_key: Tuple[int, int, int, int, str]
     secondary_time: Optional[str] = None
 
     @property
@@ -79,25 +88,28 @@ def get_edl_token(env_var: str = "EDL_TOKEN") -> str:
     return tok
 
 
-def parse_nisar_version(file_name: str) -> Tuple[str, Tuple[int, int, int, str], bool]:
+def parse_nisar_version(
+    file_name: str,
+) -> Tuple[str, Tuple[int, int, int, int, str], bool]:
     """
     Parse production version from a NISAR HDF5 filename.
 
     Returns:
         (version_tag, sort_key, parsed_ok)
-        where sort_key = (stage_rank, crid_int, counter_int, file_name).
-        Operational ('R') ranks higher than Provisional ('P').
+        where sort_key = (stage_rank, crid_int, counter_int, is_nominal_pr, file_name).
+        Operational ('R') > Provisional ('P') > CalVal ('X'), and Nominal ('_PR_') > Urgent ('_UR_').
     """
     stem = Path(file_name).name
+    is_nominal_pr = 1 if "_PR_" in stem else 0
     match = _VERSION_RE.search(stem)
     if match:
-        stage = match.group("stage").upper()
-        stage_rank = 2 if stage == "R" else 1
-        crid = int(match.group("crid"))
-        counter = int(match.group("counter"))
+        stage = (match.group("stage") or match.group("stage_short")).upper()
+        crid = int(match.group("crid") or match.group("crid_short"))
+        counter = int(match.group("counter") or match.group("counter_short"))
+        stage_rank = _STAGE_RANK.get(stage, 0)
         tag = f"{stage}{crid:05d}_{counter:03d}"
-        return tag, (stage_rank, crid, counter, stem), True
-    return "UNKNOWN", (0, 0, 0, stem), False
+        return tag, (stage_rank, crid, counter, is_nominal_pr, stem), True
+    return "UNKNOWN", (0, 0, 0, is_nominal_pr, stem), False
 
 
 def _match_url_for_result(props: Dict[str, Any], urls: Sequence[str]) -> Optional[str]:
@@ -109,7 +121,6 @@ def _match_url_for_result(props: Dict[str, Any], urls: Sequence[str]) -> Optiona
             s = str(val).strip()
             candidates.append(s)
             candidates.append(s.rsplit(".", 1)[0])
-    # Also check direct url property if present on ASFProduct
     prop_url = props.get("url")
     if isinstance(prop_url, str) and prop_url.endswith(".h5"):
         return prop_url
@@ -157,12 +168,11 @@ def normalize_and_dedupe_granules(
             )
         )
 
-    # Group by (track, frame, direction, time, secondary_time) to detect duplicates
-    by_slot: Dict[Tuple[int, int, str, str, Optional[str]], List[GranuleRecord]] = (
-        defaultdict(list)
-    )
+    # Group by (track, frame, direction, start_time) so reprocessings with slight
+    # stopTime differences are still de-duplicated properly
+    by_slot: Dict[Tuple[int, int, str, str], List[GranuleRecord]] = defaultdict(list)
     for rec in records:
-        slot = (rec.track, rec.frame, rec.direction, rec.time, rec.secondary_time)
+        slot = (rec.track, rec.frame, rec.direction, rec.time)
         by_slot[slot].append(rec)
 
     deduped: List[GranuleRecord] = []
@@ -219,18 +229,6 @@ def search_nisar(
 ) -> List[GranuleRecord]:
     """
     Search ASF DAAC for NISAR granules, match .h5 URLs, and de-duplicate.
-
-    Args:
-        bbox: (west, south, east, north) in EPSG:4326.
-        processing_level: "GCOV", "GUNW", "GOFF", or "SME2".
-        start: ISO start date/time string.
-        end: ISO end date/time string.
-        track: Optional relative orbit / pathNumber filter.
-        frame: Optional frameNumber filter.
-        direction: Optional flightDirection filter ('A' or 'D').
-        max_retries: Number of search retries on network errors.
-        retry_sleep_sec: Seconds between retries.
-        search_fn: Optional injectable replacement for `asf_search.search` (for tests).
     """
     if search_fn is None:
         import asf_search as asf
@@ -274,9 +272,7 @@ def search_nisar(
         url = _match_url_for_result(p, urls)
         if url is None:
             continue
-        file_name = str(
-            p.get("fileName") or Path(urlparse(url).path).name
-        )
+        file_name = str(p.get("fileName") or Path(urlparse(url).path).name)
         raw_items.append(
             {
                 "time": str(p.get("startTime", ""))[:19],
@@ -291,7 +287,6 @@ def search_nisar(
 
     records = normalize_and_dedupe_granules(raw_items)
 
-    # Apply optional group filters
     if track is not None:
         records = [r for r in records if r.track == int(track)]
     if frame is not None:
@@ -396,7 +391,6 @@ def download_granule_resumable(
                 url, headers=headers, stream=True, timeout=(30, 300)
             ) as resp:
                 if resp.status_code == 416:
-                    # Range Not Satisfiable -> .part file is already complete
                     part_path.rename(local_path)
                     return local_path
 
@@ -491,18 +485,8 @@ def run_with_h5_retry(
 ) -> Any:
     """
     Execute `reader_fn(h5)` inside a retry loop (default 6 tries, 10 s sleep)
-    that closes and reopens the HDF5 file handle on any failure.
-
-    Args:
-        url_or_path: Remote HTTPS URL or local file path.
-        reader_fn: Callable accepting an open `h5py.File` and returning extracted data.
-        token: Earthdata bearer token (fetched from EDL_TOKEN if None and remote).
-        download: Whether to use the resumable download fallback.
-        raw_dir: Directory for downloaded `.h5` / `.part` files.
-        max_tries: Maximum attempts before raising RuntimeError (default 6).
-        sleep_sec: Sleep duration in seconds between attempts (default 10.0).
-        block_size_mb: fsspec block cache size in MB (clamped to 2-4 MB).
-        open_fn: Optional custom file-opening callable for unit tests.
+    that closes and reopens the HDF5 file handle on transient network failures.
+    Does not retry if `UnsupportedGranuleError` is raised.
     """
     last_err: Optional[Exception] = None
     for attempt in range(1, max_tries + 1):
@@ -519,6 +503,8 @@ def run_with_h5_retry(
                     block_size_mb=block_size_mb,
                 )
             return reader_fn(h5)
+        except UnsupportedGranuleError:
+            raise
         except Exception as exc:
             last_err = exc
             logger.warning(

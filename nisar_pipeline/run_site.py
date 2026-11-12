@@ -155,6 +155,16 @@ def build_gcov_for_site(
     pol_flags_by_date: Dict[str, str] = {}
 
     for idx, rec in enumerate(group_records):
+        # Skip 0005_NADV commissioning granules that have Frequency A disabled
+        if "_0005_NADV_" in rec.file_name:
+            logger.warning(
+                "[%d/%d] Skipping commissioning granule %s (Frequency A disabled: 0005_NADV).",
+                idx + 1,
+                len(group_records),
+                rec.file_name,
+            )
+            continue
+
         logger.info(
             "[%d/%d] Streaming GCOV window for %s (%s)",
             idx + 1,
@@ -162,27 +172,38 @@ def build_gcov_for_site(
             rec.time,
             rec.file_name,
         )
-        win: GCOVWindow = run_with_h5_retry(
-            url_or_path=rec.url,
-            token=token,
-            download=download,
-            raw_dir=raw_dir,
-            max_tries=int(stream_cfg.get("max_retries", 6)),
-            sleep_sec=float(stream_cfg.get("retry_sleep_sec", 10)),
-            block_size_mb=int(stream_cfg.get("block_size_mb", 4)),
-            reader_fn=lambda h5: load_gcov_window(
-                h5,
-                bbox_lonlat=bbox,
-                looks=looks,
-                invalid_mask_values=invalid_mask_vals,
-                track=rec.track,
-                frame=rec.frame,
-                direction=rec.direction,
-                time=rec.time,
-                date_str=rec.date_str,
-                file_name=rec.file_name,
-            ),
-        )
+        try:
+            win: GCOVWindow = run_with_h5_retry(
+                url_or_path=rec.url,
+                token=token,
+                download=download,
+                raw_dir=raw_dir,
+                max_tries=int(stream_cfg.get("max_retries", 6)),
+                sleep_sec=float(stream_cfg.get("retry_sleep_sec", 10)),
+                block_size_mb=int(stream_cfg.get("block_size_mb", 4)),
+                reader_fn=lambda h5: load_gcov_window(
+                    h5,
+                    bbox_lonlat=bbox,
+                    looks=looks,
+                    invalid_mask_values=invalid_mask_vals,
+                    track=rec.track,
+                    frame=rec.frame,
+                    direction=rec.direction,
+                    time=rec.time,
+                    date_str=rec.date_str,
+                    file_name=rec.file_name,
+                ),
+            )
+        except Exception as exc:
+            logger.error(
+                "[%d/%d] Skipping granule %s on %s due to error: %s",
+                idx + 1,
+                len(group_records),
+                rec.file_name,
+                rec.time,
+                exc,
+            )
+            continue
 
         prod = compute_single_date_products(win)
         epsg_code = win.epsg

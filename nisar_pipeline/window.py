@@ -7,12 +7,13 @@ from __future__ import annotations
 import logging
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import h5py
 import numpy as np
 from pyproj import Transformer
 
+from nisar_pipeline.io_nisar import UnsupportedGranuleError
 from nisar_pipeline.layers import (
     GCOV_GRID_GROUP,
     GCOV_INCIDENCE_ANGLE,
@@ -80,7 +81,6 @@ def bbox_to_utm_slices(
     w, s, e, n = [float(v) for v in bbox_lonlat]
     tr = Transformer.from_crs(4326, epsg, always_xy=True)
 
-    # Sample corners and edge midpoints to handle meridian convergence accurately
     sample_pts = [
         (w, s),
         (e, s),
@@ -99,7 +99,7 @@ def bbox_to_utm_slices(
     iy = np.where((y_coords >= ymin) & (y_coords <= ymax))[0]
 
     if len(ix) == 0 or len(iy) == 0:
-        raise RuntimeError(
+        raise UnsupportedGranuleError(
             f"AOI bbox {bbox_lonlat} (UTM [{xmin:.1f}, {ymin:.1f}, {xmax:.1f}, {ymax:.1f}] "
             f"in EPSG:{epsg}) is outside this granule's footprint "
             f"(X=[{x_coords.min():.1f}, {x_coords.max():.1f}], "
@@ -134,8 +134,7 @@ def block_mean(arr: np.ndarray, looks: int) -> np.ndarray:
 
 def block_mask_nearest(mask_arr: np.ndarray, looks: int) -> np.ndarray:
     """
-    Downsample a discrete uint8 mask using top-left / nearest-neighbor sampling
-    while propagating invalid flags if an entire block is invalid.
+    Downsample a discrete uint8 mask using top-left / nearest-neighbor sampling.
     """
     if looks <= 1:
         return mask_arr.astype(np.uint8, copy=False)
@@ -185,7 +184,6 @@ def _read_interpolated_incidence_angle(
         rx = h5[GCOV_RADAR_GRID_X][:]
         ry = h5[GCOV_RADAR_GRID_Y][:]
         raw = inc_ds[:]
-        # radarGrid cubes are typically (z, y, x); select middle/ground height slice
         if raw.ndim == 3:
             slice_2d = np.asarray(raw[raw.shape[0] // 2, :, :], dtype=np.float32)
         elif raw.ndim == 2:
@@ -193,7 +191,6 @@ def _read_interpolated_incidence_angle(
         else:
             return None
 
-        # Ensure ascending order for 1D linear interpolation along X and Y
         if rx[0] > rx[-1]:
             rx = rx[::-1]
             slice_2d = slice_2d[:, ::-1]
@@ -201,7 +198,6 @@ def _read_interpolated_incidence_angle(
             ry = ry[::-1]
             slice_2d = slice_2d[::-1, :]
 
-        # Two-pass separable linear interpolation (first X, then Y)
         interp_x = np.empty((slice_2d.shape[0], len(target_x)), dtype=np.float32)
         for row_idx in range(slice_2d.shape[0]):
             interp_x[row_idx, :] = np.interp(
@@ -234,13 +230,26 @@ def load_gcov_window(
     Stream only the AOI window from a NISAR GCOV HDF5 file, mask invalid/nonpositive
     and layover/shadow pixels in linear power, and multilook.
 
-    Do NOT interpolate across missing polarizations: if HVHV/VHVH is absent or all-NaN,
-    record the gap in `missing_pols` and set `has_dual_pol=False`.
+    Falls back to `/science/LSAR/GCOV/grids/frequencyB` if `frequencyA` is absent, or
+    raises `UnsupportedGranuleError` immediately without retrying.
     """
-    if GCOV_GRID_GROUP not in h5:
-        raise RuntimeError(f"Missing expected GCOV grid group '{GCOV_GRID_GROUP}'.")
+    grid_path = GCOV_GRID_GROUP
+    if grid_path not in h5:
+        alt_grid_path = "/science/LSAR/GCOV/grids/frequencyB"
+        if alt_grid_path in h5:
+            logger.warning(
+                "Granule %s is missing '%s'; falling back to '%s'.",
+                file_name,
+                grid_path,
+                alt_grid_path,
+            )
+            grid_path = alt_grid_path
+        else:
+            raise UnsupportedGranuleError(
+                f"Granule {file_name} has neither '{GCOV_GRID_GROUP}' nor '{alt_grid_path}'."
+            )
 
-    g = h5[GCOV_GRID_GROUP]
+    g = h5[grid_path]
     x_full = g[GCOV_X.split("/")[-1]][:]
     y_full = g[GCOV_Y.split("/")[-1]][:]
     epsg = read_epsg_from_projection(g[GCOV_PROJECTION.split("/")[-1]])
@@ -276,8 +285,8 @@ def load_gcov_window(
             missing_pols.append(pol_name)
 
     if not pols:
-        raise RuntimeError(
-            f"No valid GCOV polarization layers found in AOI window. "
+        raise UnsupportedGranuleError(
+            f"No valid GCOV polarization layers found in AOI window for {file_name}. "
             f"Group keys: {list(g.keys())}"
         )
 
@@ -317,9 +326,6 @@ def subtract_reference_window(
     """
     Reference a displacement or phase grid to the median of a stable reference box
     `(west, south, east, north)` in EPSG:4326.
-
-    Returns:
-        (referenced_array_float32, ref_value)
     """
     slice_y, slice_x, _ = bbox_to_utm_slices(x_coords, y_coords, ref_bbox_lonlat, epsg)
     patch = arr[slice_y, slice_x]
@@ -341,22 +347,11 @@ def chain_pairwise_displacements(
     """
     Compute a cumulative displacement stack from nearest-neighbor sequential pairs
     (e.g., 12-day interferograms: [d(t0->t1), d(t1->t2), ..., d(t_{k-1}->t_k)]).
-
-    Args:
-        pair_displacements: Sequence of N 2D float32 arrays of shape (H, W).
-        propagate_nan: If True, NaN at step k makes all subsequent steps >= k NaN.
-                       If False, only pixels that are NaN at step k are masked at step k
-                       while cumulative sum continues across valid dates (with a completely
-                       unobserved pixel remaining NaN).
-
-    Returns:
-        3D float32 array of shape (N + 1, H, W) where index 0 is zeros (masked to NaN
-        where all pairs are NaN) and index k is sum_{i=0..k-1} pair_displacements[i].
     """
     if not pair_displacements:
         raise ValueError("pair_displacements cannot be empty.")
 
-    stack = np.stack([ np.asarray(p, dtype=np.float32) for p in pair_displacements ], axis=0)
+    stack = np.stack([np.asarray(p, dtype=np.float32) for p in pair_displacements], axis=0)
     n_pairs, h, w = stack.shape
     cum = np.zeros((n_pairs + 1, h, w), dtype=np.float32)
 
