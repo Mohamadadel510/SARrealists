@@ -71,15 +71,35 @@ def aoi_wkt(bbox: Sequence[float]) -> str:
     return f"POLYGON(({w} {s},{e} {s},{e} {n},{w} {n},{w} {s}))"
 
 
-def get_edl_token(env_var: str = "EDL_TOKEN") -> str:
+def get_edl_token(
+    env_var: str = "EDL_TOKEN",
+    token_file: Path | str = "/content/.edl_token",
+) -> str:
     """
-    Read Earthdata Login bearer token from environment variable.
+    Read Earthdata Login bearer token from:
+      1. Environment variable `EDL_TOKEN`
+      2. Local session cache `/content/.edl_token` (survives Colab kernel restarts)
+      3. Interactive `getpass` prompt if running in an interactive terminal
     Never prints or logs the token value.
     """
-    raw = os.environ.get(env_var, "")
-    tok = raw.strip().strip('"').strip("'")
+    raw = os.environ.get(env_var, "").strip()
+
+    tpath = Path(token_file)
+    if not raw and tpath.exists():
+        try:
+            raw = tpath.read_text(encoding="utf-8").strip()
+        except Exception:
+            raw = ""
+
+    if not raw and os.isatty(0):
+        from getpass import getpass
+
+        raw = getpass("Earthdata bearer token: ").strip()
+
+    tok = raw.strip('"').strip("'")
     if tok.lower().startswith("bearer "):
         tok = tok[7:].strip()
+
     if not tok:
         raise RuntimeError(
             f"Missing Earthdata bearer token in environment variable '{env_var}'. "
