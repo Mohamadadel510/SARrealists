@@ -295,3 +295,84 @@ def test_deduplication_and_unverified_guard() -> None:
 
     with pytest.raises(RuntimeError, match="is UNVERIFIED"):
         require_verified_layer(GUNW_UNWRAPPED_PHASE, product="GUNW")
+def test_gunw_los_vertical_and_robust_rate() -> None:
+    """Verify GUNW LOS formula (-phase*lambda/(4*pi)), flat-site vertical check, and rate fit."""
+    from nisar_pipeline.gunw import (
+        fit_robust_linear_rate_mm_yr,
+        los_to_vertical_displacement_mm,
+        phase_to_los_displacement_mm,
+    )
+
+    # 1 radian of positive unwrapped phase -> -0.24 / (4 * pi) * 1000 = -19.098593 mm
+    phase = np.array([[0.0, float(np.pi)], [-float(np.pi), np.nan]], dtype=np.float32)
+    los_mm = phase_to_los_displacement_mm(phase, wavelength_m=0.24)
+    assert np.isclose(los_mm[0, 0], 0.0)
+    assert np.isclose(los_mm[0, 1], -60.0, atol=1e-4)  # -pi * 0.24 / (4*pi) * 1000 = -60 mm
+    assert np.isclose(los_mm[1, 0], 60.0, atol=1e-4)
+    assert np.isnan(los_mm[1, 1])
+
+    # Vertical displacement must fail when flat_terrain=False
+    with pytest.raises(ValueError, match="only allowed for flat terrain"):
+        los_to_vertical_displacement_mm(los_mm, incidence_angle_deg=60.0, flat_terrain=False)
+
+    # At 60 deg incidence angle (cos=0.5), vertical = LOS / 0.5 = 2 * LOS
+    vert_mm = los_to_vertical_displacement_mm(los_mm, incidence_angle_deg=60.0, flat_terrain=True)
+    assert np.isclose(vert_mm[0, 1], -120.0, atol=1e-3)
+
+    # Synthetic cumulative displacement stack over 4 dates spaced by ~0.25 yr with -20 mm/yr rate
+    dates = ["20260101", "20260402", "20260702", "20261001"]
+    t_yrs = np.array([0.0, 91.0 / 365.25, 182.0 / 365.25, 273.0 / 365.25], dtype=np.float32)
+    cum = np.zeros((4, 2, 2), dtype=np.float32)
+    for i, ty in enumerate(t_yrs):
+        cum[i, 0, 0] = -20.0 * ty
+        cum[i, 0, 1] = 15.0 * ty
+    cum[:2, 1, 0] = np.nan  # Only 2 valid dates (< min_dates=3) -> must be NaN
+
+    rate = fit_robust_linear_rate_mm_yr(dates, cum, min_dates=3)
+    assert np.isclose(rate[0, 0], -20.0, atol=0.2)
+    assert np.isclose(rate[0, 1], 15.0, atol=0.2)
+    assert np.isnan(rate[1, 0])
+
+
+def test_goff_velocity_and_3857_reproject(tmp_path: Path) -> None:
+    """Verify GOFF velocity vector calculation and linear-before-dB EPSG:3857 reprojection."""
+    from nisar_pipeline.export_web import (
+        export_velocity_vectors_geojson,
+        reproject_array_to_3857,
+    )
+    from nisar_pipeline.goff import compute_velocity_vectors
+
+    # Zero slant-range offset, +12 m along-track offset over 36.525 days (0.1 yr) -> 120 m/yr along heading
+    sr_off = np.zeros((4, 4), dtype=np.float32)
+    az_off = np.full((4, 4), 12.0, dtype=np.float32)
+    vel = compute_velocity_vectors(
+        sr_off, az_off, dt_days=36.525, incidence_angle_deg=38.0, heading_deg=0.0
+    )
+    assert np.allclose(vel["speed_m_yr"], 120.0, atol=1e-3)
+    assert np.allclose(vel["direction_deg"], 0.0, atol=1e-3)
+
+    x = 300000.0 + np.arange(4, dtype=np.float64) * 80.0
+    y = 3420000.0 - np.arange(4, dtype=np.float64) * 80.0
+    geojson_out = export_velocity_vectors_geojson(
+        vel["v_east_m_yr"],
+        vel["v_north_m_yr"],
+        vel["speed_m_yr"],
+        vel["direction_deg"],
+        x,
+        y,
+        epsg=32644,
+        out_geojson_path=tmp_path / "glacier_velocity.geojson",
+        stride=2,
+    )
+    assert geojson_out.exists()
+
+    # Reproject linear power to EPSG:3857 first, then convert to dB
+    lin_power = np.full((8, 8), 0.10, dtype=np.float32)
+    x8 = 300000.0 + np.arange(8, dtype=np.float64) * 80.0
+    y8 = 3420000.0 - np.arange(8, dtype=np.float64) * 80.0
+    warped_db, _, _ = reproject_array_to_3857(
+        lin_power, x8, y8, src_epsg=32644, convert_linear_to_db_after=True
+    )
+    finite_db = warped_db[np.isfinite(warped_db)]
+    assert finite_db.size > 0
+    assert np.allclose(finite_db, -10.0, atol=1e-2)
