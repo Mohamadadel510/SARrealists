@@ -1,0 +1,146 @@
+# Configuration for NASA-ISRO NISAR Web Visualization Pipeline
+raw_dir: "/content/nisar_raw"
+out_dir: "out"
+
+streaming:
+  block_size_mb: 4
+  sock_connect_timeout: 60
+  sock_read_timeout: 900
+  max_retries: 6
+  retry_sleep_sec: 10
+  download_max_retries: 30
+  download_chunk_mb: 8
+
+gcov_defaults:
+  invalid_mask_values: [0, 255]
+
+gunw_defaults:
+  wavelength_m: 0.24
+  coherence_threshold: 0.4
+  min_dates_for_rate: 3
+
+sites:
+  california:
+    title: "California Wildfire (Palisades / Santa Monica Mtns)"
+    bbox: [-118.64, 34.05, -118.58, 34.10]
+    start: "2025-10-01"
+    end: "2026-12-31"
+    looks: 2
+    flat_terrain: false
+    known_tracks:
+      - { track: 13, direction: "D" }
+      - { track: 114, direction: "D" }
+      - { track: 34, direction: "A" }
+    reference_box: [-118.635, 34.052, -118.630, 34.057]
+    sample_points:
+      - { id: "cal_burn_core", lon: -118.610, lat: 34.075 }
+      - { id: "cal_unburned_ref", lon: -118.632, lat: 34.055 }
+
+  nile_delta:
+    title: "Nile Delta Agriculture & Land Subsidence"
+    bbox: [30.3, 31.0, 31.6, 31.6]
+    expected_epsg: 32636
+    start: "2025-10-01"
+    end: "2026-12-31"
+    looks: 4
+    flat_terrain: true
+    coherence_threshold: 0.4
+    reference_box: [30.95, 31.10, 31.00, 31.15]
+    sample_points:
+      - { id: "nile_ag_west", lon: 30.65, lat: 31.25 }
+      - { id: "nile_coastal_sub", lon: 31.15, lat: 31.45 }
+      - { id: "nile_stable_ref", lon: 30.97, lat: 31.12 }
+
+  himalaya:
+    title: "Himalayan Glaciers (Gangotri Region)"
+    bbox: [78.9, 30.8, 79.2, 31.1]
+    expected_epsg: 32644
+    start: "2025-10-01"
+    end: "2026-12-31"
+    looks: 2
+    flat_terrain: false
+    rgi_geojson: null
+    reference_box: [78.92, 30.82, 78.95, 30.85]
+    sample_points:
+      - { id: "gangotri_snout", lon: 79.08, lat: 30.92 }
+      - { id: "gangotri_upper", lon: 79.14, lat: 30.86 }
+
+color_ranges:
+  hh_db:
+    title: "Co-Pol Backscatter (HH/VV)"
+    units: "dB"
+    vmin: -22.0
+    vmax: 0.0
+    cmap: "gray"
+  hv_db:
+    title: "Cross-Pol Backscatter (HV/VH)"
+    units: "dB"
+    vmin: -30.0
+    vmax: -8.0
+    cmap: "gray"
+  pol_ratio_db:
+    title: "Cross/Co-Pol Ratio (HV/HH)"
+    units: "dB"
+    vmin: -15.0
+    vmax: -2.0
+    cmap: "viridis"
+  rvi:
+    title: "Radar Vegetation Index (Dual-Pol)"
+    units: "unitless"
+    vmin: 0.0
+    vmax: 1.0
+    cmap: "YlGn"
+  hv_db_change:
+    title: "Cross-Pol Backscatter Change"
+    units: "dB"
+    vmin: -6.0
+    vmax: 6.0
+    cmap: "RdBu"
+  hh_db_change:
+    title: "Co-Pol Backscatter Change"
+    units: "dB"
+    vmin: -6.0
+    vmax: 6.0
+    cmap: "RdBu"
+  rvi_change:
+    title: "RVI Change"
+    units: "unitless"
+    vmin: -0.4
+    vmax: 0.4
+    cmap: "RdBu"
+  coherence:
+    title: "Interferometric Coherence"
+    units: "unitless"
+    vmin: 0.0
+    vmax: 1.0
+    cmap: "magma"
+  los_disp_mm:
+    title: "Cumulative LOS Displacement"
+    units: "mm"
+    vmin: -100.0
+    vmax: 100.0
+    cmap: "RdBu_r"
+  vert_disp_mm:
+    title: "Cumulative Vertical Displacement"
+    units: "mm"
+    vmin: -120.0
+    vmax: 120.0
+    cmap: "RdBu_r"
+  disp_rate_mm_yr:
+    title: "Linear Displacement Rate"
+    units: "mm/yr"
+    vmin: -50.0
+    vmax: 50.0
+    cmap: "RdBu_r"
+  velocity_m_yr:
+    title: "Glacier Surface Speed"
+    units: "m/yr"
+    vmin: 0.0
+    vmax: 150.0
+    cmap: "plasma"
+  soil_moisture:
+    title: "Volumetric Soil Moisture"
+    units: "m3/m3"
+    vmin: 0.02
+    vmax: 0.50
+    cmap: "YlGnBu"
