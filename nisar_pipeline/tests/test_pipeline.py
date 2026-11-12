@@ -13,19 +13,19 @@ Verifies:
 from __future__ import annotations
 
 import io
-from typing import Any
+import sys
+from pathlib import Path
+
+# Ensure the repo root (/content/SARrealists) is on sys.path for bare `pytest` invocations
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import h5py
 import numpy as np
 import pytest
 from pyproj import Transformer
-import sys
-from pathlib import Path
-# Ensure the repo root (/content/SARrealists) is on sys.path for bare `pytest` invocations
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-    
+
 from nisar_pipeline.gcov import (
     compute_pairwise_change,
     compute_rvi,
@@ -70,7 +70,7 @@ def _create_synthetic_gcov_h5(
     proj.attrs["epsg_code"] = np.int32(epsg)
 
     hh = np.full((ny, nx), 0.25, dtype=np.float32)
-    # Inject nonpositive and NaN values to verify masking
+    # Inject nonpositive values at (0, 0) and (0, 1) to verify masking
     hh[0, 0] = -1.0
     hh[0, 1] = 0.0
     g.create_dataset("HHHH", data=hh)
@@ -109,7 +109,7 @@ def test_multilook_linear_before_db_order() -> None:
 
 
 def test_rvi_bounds_and_hh_only_fallback() -> None:
-    """Verify RVI = 4*HV/(HH+HV) values, bounds, and HH-only cycle NaN fallback."""
+    """Verify RVI = 4*HV/(HH+HV) values, bounds [0, 1], and HH-only cycle NaN fallback."""
     hh = np.array([[0.30, 0.40], [0.20, 0.0]], dtype=np.float32)
     hv = np.array([[0.0001, 0.10], [0.0666667, 0.05]], dtype=np.float32)
 
@@ -117,7 +117,7 @@ def test_rvi_bounds_and_hh_only_fallback() -> None:
     assert rvi.dtype == np.float32
     # At (0, 1): 4 * 0.10 / (0.40 + 0.10) = 0.80
     assert np.isclose(rvi[0, 1], 0.80, atol=1e-5)
-    # At (1, 0): 4 * (1/15) / (3/15 + 1/15) = 1.0
+    # At (1, 0): 4 * (1/15) / (3/15 + 1/15) = 1.0 (clipped to 1.0)
     assert np.isclose(rvi[1, 0], 1.0, atol=1e-4)
     # At (1, 1): HH == 0 -> masked to NaN
     assert np.isnan(rvi[1, 1])
@@ -233,9 +233,9 @@ def test_window_selection_mask_and_retry() -> None:
     """Verify AOI window slicing, layover/shadow mask removal, and retry reopen logic."""
     h5 = _create_synthetic_gcov_h5(epsg=32611, ny=60, nx=60, include_hv=False)
     tr = Transformer.from_crs(32611, 4326, always_xy=True)
-    # Select a sub-window covering indices [0..20, 0..20]
-    w, s = tr.transform(348000.0, 3776000.0 - 20 * 20.0)
-    e, n = tr.transform(348000.0 + 20 * 20.0, 3776000.0)
+    # Pad by 5 m outside pixel centers (348000.0, 3776000.0) to avoid round-trip boundary drift
+    w, s = tr.transform(348000.0 - 5.0, 3776000.0 - 20 * 20.0 - 5.0)
+    e, n = tr.transform(348000.0 + 20 * 20.0 + 5.0, 3776000.0 + 5.0)
 
     attempts = {"count": 0}
 
@@ -260,6 +260,8 @@ def test_window_selection_mask_and_retry() -> None:
     assert "HVHV" in win.missing_pols
     # Layover/shadow block [2:4, 2:4] (mask=255) -> multilooked pixel [1, 1] must be NaN
     assert np.isnan(win.pols["HHHH"][1, 1])
+    # Valid block [4:6, 4:6] (mask=0) -> multilooked pixel [2, 2] must also be NaN
+    assert np.isnan(win.pols["HHHH"][2, 2])
     # Single-date product falls back cleanly to HHHH-only
     prod = compute_single_date_products(win)
     assert prod["polarization_flag"] == "HHHH_ONLY_GAP"

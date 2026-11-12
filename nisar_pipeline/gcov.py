@@ -59,8 +59,8 @@ def compute_rvi(
 ) -> np.ndarray:
     """
     Compute Dual-Pol Radar Vegetation Index in linear power:
-        RVI = 4 * HV / (HH + HV)
-    where 0 = bare surface and -> 1 = dense volume scattering.
+        RVI = clip(4 * HV / (HH + HV), 0.0, 1.0)
+    where 0 = bare surface and 1 = dense volume scattering.
     If cross_linear is None (e.g., HH-only cycle), returns an all-NaN float32 array.
     """
     co = np.asarray(co_linear, dtype=np.float32)
@@ -71,7 +71,7 @@ def compute_rvi(
     cr = np.asarray(cross_linear, dtype=np.float32)
     denom = co + cr
     valid = np.isfinite(co) & np.isfinite(cr) & (co > 0.0) & (cr > 0.0) & (denom > 0.0)
-    out[valid] = (4.0 * cr[valid]) / denom[valid]
+    out[valid] = np.clip((4.0 * cr[valid]) / denom[valid], 0.0, 1.0)
     return out
 
 
