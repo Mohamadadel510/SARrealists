@@ -19,7 +19,13 @@ import h5py
 import numpy as np
 import pytest
 from pyproj import Transformer
-
+import sys
+from pathlib import Path
+# Ensure the repo root (/content/SARrealists) is on sys.path for bare `pytest` invocations
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+    
 from nisar_pipeline.gcov import (
     compute_pairwise_change,
     compute_rvi,

@@ -392,9 +392,13 @@ def append_to_zarr_stack(
     """
     Incrementally write or append a single date's 2D float32 array to a
     `time x y x x` Zarr stack (`out/<site>/stack/<layer>.zarr`).
+    Compatible with both Zarr v2 and Zarr v3 on Python 3.13.
     """
     zarr_path.parent.mkdir(parents=True, exist_ok=True)
     data, x_c, y_c, _ = compute_affine_and_orient(arr, x, y)
+
+    # Use object dtype for string time coordinates so both Zarr v2 and Zarr v3 accept it
+    time_coord = np.array([str(date_str)], dtype=object)
 
     ds_new = xr.Dataset(
         {
@@ -404,7 +408,7 @@ def append_to_zarr_stack(
             )
         },
         coords={
-            "time": [str(date_str)],
+            "time": time_coord,
             "y": y_c.astype(np.float64),
             "x": x_c.astype(np.float64),
         },
@@ -415,10 +419,12 @@ def append_to_zarr_stack(
         ds_new.to_zarr(zarr_path, mode="w")
     else:
         existing = xr.open_zarr(zarr_path)
-        if str(date_str) in existing["time"].values.tolist():
-            logger.info("Date %s already present in %s; skipping append.", date_str, zarr_path)
+        existing_times = [str(t) for t in existing["time"].values.tolist()]
+        if str(date_str) in existing_times:
+            logger.info(
+                "Date %s already present in %s; skipping append.", date_str, zarr_path
+            )
             return zarr_path
-        # Align onto existing stack grid if slight bounds differences exist
         ds_aligned = ds_new.reindex(
             y=existing["y"].values,
             x=existing["x"].values,
