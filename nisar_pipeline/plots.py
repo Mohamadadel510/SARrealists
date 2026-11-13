@@ -38,29 +38,14 @@ HUMAN_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "hv_db": {
-        "friendly_title": "Vegetation & Canopy Density (HV Cross-Pol)",
-        "what_it_shows": "Dark = Bare Ground / Water | Bright = Dense Crop Canopy, Trees & Rough Ice",
-        "vmin": -30.0,
-        "vmax": -8.0,
-        "cmap": "YlGn",
+        "friendly_title": "Cross-Pol Backscatter: Crop Volume & Rotated Structures (HV)",
+        "what_it_shows": "Dark = Water / Bare Sand | Mid Green = Irrigated Crops | Darkest Green = Orchards & Rotated Village Buildings (use RVI to isolate pure crops)",
+        "vmin": -30.0, "vmax": -8.0, "cmap": "YlGn",
         "stops": [
             (-30.0, "Water / Bare Soil [-30 dB]"),
-            (-22.0, "Sparse Shrubs / Young Crops [-22 dB]"),
-            (-15.0, "Mature Crops / Woodland [-15 dB]"),
-            (-8.0, "Dense Forest / Thick Canopy [-8 dB]"),
-        ],
-    },
-    "rvi": {
-        "friendly_title": "Radar Vegetation Health Index (Dual-Pol RVI)",
-        "what_it_shows": "Combines HH + HV to separate bare ground from dense plant biomass",
-        "vmin": 0.0,
-        "vmax": 1.0,
-        "cmap": "YlGn",
-        "stops": [
-            (0.0, "Bare Ground / Water [0.0]"),
-            (0.35, "Light Vegetation [0.35]"),
-            (0.70, "Healthy Crop Cover [0.70]"),
-            (1.0, "Dense Canopy Biomass [1.0]"),
+            (-22.0, "Young / Sparse Crops [-22 dB]"),
+            (-15.0, "Dense Irrigated Field Crops [-15 dB]"),
+            (-8.0, "Orchards / Village Corner Bounce [-8 dB]"),
         ],
     },
     "pol_ratio_db": {
@@ -252,7 +237,10 @@ def plot_pol_and_freq_explorer(
     hv_a_db = prod["layers"]["hv_db"]
     freq_diff_db = prod["layers"]["freq_diff_db"]
     hh_b_db = prod.get("hh_b_db")
-    rgb_hwc = np.transpose(prod["rgb"], (1, 2, 0))
+    rgb_hwc = np.transpose(prod["rgb"], (1, 2, 0))  # (H, W, 3) uint8
+    alpha = np.where(np.isfinite(hh_a_db), 255, 0).astype(np.uint8)[..., np.newaxis]
+    rgba_hwc = np.concatenate([rgb_hwc, alpha], axis=-1)
+    ax3.imshow(rgba_hwc, extent=extent_km, origin="upper", aspect="equal")
 
     ext_km = [
         float(win.x.min()) / 1e3,

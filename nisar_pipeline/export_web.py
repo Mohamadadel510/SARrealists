@@ -278,19 +278,17 @@ def export_rgb_xyz_png_tiles(
                         dst_crs=dst_crs,
                         src_nodata=0,
                         dst_nodata=0,
-                        resampling=Resampling.bilinear,
+                        resampling=Resampling.nearest,
                     )
 
-                valid = (tile_rgb[0] > 0) | (tile_rgb[1] > 0) | (tile_rgb[2] > 0)
-                if not np.any(valid):
+                valid_mask = (tile_rgb[0] > 0) | (tile_rgb[1] > 0) | (tile_rgb[2] > 0)
+                if not np.any(valid_mask):
                     continue
-
                 rgba = np.zeros((tile_size, tile_size, 4), dtype=np.uint8)
                 rgba[:, :, 0] = tile_rgb[0]
                 rgba[:, :, 1] = tile_rgb[1]
                 rgba[:, :, 2] = tile_rgb[2]
-                rgba[:, :, 3] = np.where(valid, 255, 0).astype(np.uint8)
-
+                rgba[:, :, 3] = np.where(valid_mask, 255, 0).astype(np.uint8)
                 png_path = tiles_dir / str(z) / str(tx) / f"{ty}.png"
                 png_path.parent.mkdir(parents=True, exist_ok=True)
                 mpimg.imsave(png_path, rgba)

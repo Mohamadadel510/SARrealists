@@ -3,7 +3,8 @@ NISAR L2 GCOV science processing:
 - Linear power to dB conversion (strictly after multilooking/reprojection)
 - Co/cross polarization selection and HH-only cycle fallback
 - Dual-pol Radar Vegetation Index (RVI = 4 * HV / (HH + HV))
-- Stretched RGB composite generation
+- Dual-frequency split-spectrum difference (Freq A dB - Freq B dB)
+- Urban-suppressed Polarimetric RGB composite generation (3-band uint8 COG + tiles)
 - Same-track/frame/direction pairwise change detection
 - Incremental GeoTIFF (COG), Zarr stack, point time series, and catalog generation
 """
@@ -92,6 +93,22 @@ def compute_pol_ratio_db(
     return linear_to_db(ratio_lin)
 
 
+def compute_freq_diff_db(
+    co_a_linear: np.ndarray,
+    co_b_linear: Optional[np.ndarray],
+) -> np.ndarray:
+    """
+    Compute simultaneous Dual-Frequency split-spectrum difference in dB:
+        freq_diff_db = 10*log10(Freq_A_co_pol) - 10*log10(Freq_B_co_pol)
+    Returns all-NaN float32 if Frequency B is not present.
+    """
+    co_a = np.asarray(co_a_linear, dtype=np.float32)
+    if co_b_linear is None:
+        return np.full(co_a.shape, np.nan, dtype=np.float32)
+    co_b = np.asarray(co_b_linear, dtype=np.float32)
+    return (linear_to_db(co_a) - linear_to_db(co_b)).astype(np.float32)
+
+
 def _stretch_uint8(arr: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     """Linearly scale float array into [1, 255] uint8 with 0 reserved for NaN nodata."""
     out = np.zeros(arr.shape, dtype=np.uint8)
@@ -109,31 +126,59 @@ def compute_rgb_composite(
     cross_db: Optional[np.ndarray],
     rvi_arr: Optional[np.ndarray] = None,
     co_range: Tuple[float, float] = (-22.0, 0.0),
-    cross_range: Tuple[float, float] = (-30.0, -8.0),
-    rvi_range: Tuple[float, float] = (0.0, 1.0),
+    cross_range: Tuple[float, float] = (-28.0, -10.0),
+    rvi_range: Tuple[float, float] = (0.15, 0.80),
 ) -> np.ndarray:
     """
-    Build a 3-band (3, H, W) uint8 SAR RGB composite:
-      R = Co-pol dB (HH)
-      G = Cross-pol dB (HV)  [or Co-pol if single-pol cycle]
-      B = RVI (or Cross - Co dB difference)
+    Build a 3-band `(3, H, W)` uint8 Polarimetric RGB composite (`0` = NaN nodata):
+      - Red:   HH Co-Pol surface & double-bounce intensity
+      - Green: Crop & canopy volume scattering (HV + RVI) with an urban double-bounce
+               suppressor so rotated concrete buildings/villages do not appear green
+      - Blue:  Co-pol surface dominance & urban double-bounce boost so cities render
+               cleanly as Magenta/Pink and bare moist soil as Blue/Cyan
     """
     r_band = _stretch_uint8(co_db, co_range[0], co_range[1])
     if cross_db is None or not np.any(np.isfinite(cross_db)):
         return np.stack([r_band, r_band, r_band], axis=0)
 
-    g_band = _stretch_uint8(cross_db, cross_range[0], cross_range[1])
+    valid = np.isfinite(co_db) & np.isfinite(cross_db)
+
+    # Normalized HV backscatter (scaled for agricultural crop range -28 to -10 dB)
+    hv_norm = np.clip(
+        (cross_db - cross_range[0]) / max(1e-6, cross_range[1] - cross_range[0]),
+        0.0,
+        1.0,
+    )
+
+    # Normalized RVI (high over crops where HV is large relative to HH; low over cities)
     if rvi_arr is not None and np.any(np.isfinite(rvi_arr)):
-        b_band = _stretch_uint8(rvi_arr, rvi_range[0], rvi_range[1])
+        rvi_norm = np.clip(
+            (rvi_arr - rvi_range[0]) / max(1e-6, rvi_range[1] - rvi_range[0]),
+            0.0,
+            1.0,
+        )
     else:
-        diff_db = cross_db - co_db
-        b_band = _stretch_uint8(diff_db, -15.0, -2.0)
+        rvi_norm = hv_norm
+
+    # Urban Double-Bounce Suppressor:
+    # Buildings/villages have extreme HH (> -6.5 dB) alongside high HV.
+    # Attenuate Green on urban pixels so cities don't masquerade as dense canopy.
+    urban_weight = np.clip((co_db - (-6.5)) / (-3.0 - (-6.5)), 0.0, 1.0)
+    veg_index = (0.45 * hv_norm + 0.55 * rvi_norm) * (1.0 - 0.80 * urban_weight)
+
+    # Blue channel: Co-pol dominance (smooth moist soil + urban double-bounce -> Magenta R+B)
+    pol_diff_norm = np.clip(((co_db - cross_db) - 4.0) / (14.0 - 4.0), 0.0, 1.0)
+    blue_index = np.clip(0.50 * pol_diff_norm + 0.50 * urban_weight, 0.0, 1.0)
+
+    g_band = _stretch_uint8(np.where(valid, veg_index, np.nan), 0.0, 1.0)
+    b_band = _stretch_uint8(np.where(valid, blue_index, np.nan), 0.0, 1.0)
     return np.stack([r_band, g_band, b_band], axis=0)
 
 
 def compute_single_date_products(window: GCOVWindow) -> Dict[str, Any]:
     """
-    Compute all single-date GCOV derived layers from a multilooked linear-power window.
+    Compute all single-date GCOV derived layers from a multilooked linear-power window,
+    including Dual-Frequency split-spectrum differences (`freq_diff_db`) and RGB composite.
     Never interpolates missing polarizations.
     """
     co_key, cross_key = resolve_co_cross_pols(window.pols)
@@ -164,6 +209,11 @@ def compute_single_date_products(window: GCOVWindow) -> Dict[str, Any]:
         pol_ratio_db = np.full(co_lin.shape, np.nan, dtype=np.float32)
         polarization_flag = f"{co_key}_ONLY_GAP"
 
+    co_b_key, _ = resolve_co_cross_pols(window.freq_b_pols)
+    co_b_lin = window.freq_b_pols.get(co_b_key) if co_b_key else None
+    freq_diff_db = compute_freq_diff_db(co_lin, co_b_lin)
+    hh_b_db = linear_to_db(co_b_lin) if co_b_lin is not None else None
+
     rgb = compute_rgb_composite(hh_db, hv_db if cross_lin is not None else None, rvi_arr)
 
     return {
@@ -171,12 +221,17 @@ def compute_single_date_products(window: GCOVWindow) -> Dict[str, Any]:
         "cross_pol_name": cross_key,
         "polarization_flag": polarization_flag,
         "has_dual_pol": cross_lin is not None,
+        "has_dual_freq": co_b_lin is not None,
+        "freq_a_mhz": window.freq_a_mhz,
+        "freq_b_mhz": window.freq_b_mhz,
         "layers": {
             "hh_db": hh_db,
             "hv_db": hv_db,
             "rvi": rvi_arr,
             "pol_ratio_db": pol_ratio_db,
+            "freq_diff_db": freq_diff_db,
         },
+        "hh_b_db": hh_b_db,
         "rgb": rgb,
         "x": window.x,
         "y": window.y,
@@ -307,6 +362,7 @@ def compute_affine_and_orient(
     """
     Ensure raster array rows are ordered North-to-South (top-down) and columns
     West-to-East (left-to-right), returning `(arr_oriented, x_asc, y_desc, transform)`.
+    Supports both 2D `(H, W)` float arrays and 3D `(C, H, W)` uint8 RGB arrays.
     """
     out = arr
     x_out = x.copy()
@@ -314,17 +370,18 @@ def compute_affine_and_orient(
 
     if len(x_out) > 1 and x_out[0] > x_out[-1]:
         x_out = x_out[::-1]
-        out = out[:, ::-1]
+        out = out[..., :, ::-1]
     if len(y_out) > 1 and y_out[0] < y_out[-1]:
         y_out = y_out[::-1]
-        out = out[::-1, :]
+        out = out[..., ::-1, :]
 
     dx = float(abs(x_out[1] - x_out[0])) if len(x_out) > 1 else 20.0
     dy = float(abs(y_out[1] - y_out[0])) if len(y_out) > 1 else 20.0
     west = float(x_out.min() - dx / 2.0)
     north = float(y_out.max() + dy / 2.0)
     transform = from_origin(west, north, dx, dy)
-    return np.ascontiguousarray(out, dtype=np.float32), x_out, y_out, transform
+    target_dtype = np.uint8 if arr.dtype == np.uint8 else np.float32
+    return np.ascontiguousarray(out, dtype=target_dtype), x_out, y_out, transform
 
 
 def write_float32_cog(
@@ -368,6 +425,53 @@ def write_float32_cog(
         if h >= 64 and w >= 64:
             dst.build_overviews([2, 4], Resampling.bilinear)
             dst.update_tags(ns="rio_overview", resampling="bilinear")
+
+    return out_path
+
+
+def write_rgb_cog(
+    rgb_arr: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    epsg: int,
+    out_path: Path,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """
+    Write a 3-band `(3, H, W)` uint8 Polarimetric RGB composite array (`0` = nodata)
+    as a Cloud-Optimized / tiled GeoTIFF in native UTM projection.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    data, _, _, transform = compute_affine_and_orient(rgb_arr, x, y)
+    if data.ndim != 3 or data.shape[0] != 3:
+        raise ValueError(f"Expected 3-band (3, H, W) RGB array, got shape {data.shape}")
+    _, h, w = data.shape
+
+    block_h = min(256, max(16, (h // 16) * 16)) if h >= 16 else h
+    block_w = min(256, max(16, (w // 16) * 16)) if w >= 16 else w
+    tiled = h >= 16 and w >= 16
+
+    profile: Dict[str, Any] = {
+        "driver": "GTiff",
+        "height": h,
+        "width": w,
+        "count": 3,
+        "dtype": "uint8",
+        "crs": f"EPSG:{epsg}",
+        "transform": transform,
+        "nodata": 0,
+        "compress": "DEFLATE",
+    }
+    if tiled:
+        profile.update({"tiled": True, "blockxsize": block_w, "blockysize": block_h})
+
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(data.astype(np.uint8, copy=False))
+        if metadata:
+            dst.update_tags(**{k: str(v) for k, v in metadata.items()})
+        if h >= 64 and w >= 64:
+            dst.build_overviews([2, 4], Resampling.nearest)
+            dst.update_tags(ns="rio_overview", resampling="nearest")
 
     return out_path
 
@@ -517,15 +621,25 @@ def update_points_timeseries_json(
             idx = len(rec["dates"]) - 1
 
         if "hv_db" in layers:
-            rec["hv_db"][idx] = sample_point_value(layers["hv_db"], x, y, epsg, lon, lat)
+            v = sample_point_value(layers["hv_db"], x, y, epsg, lon, lat)
+            if v is not None:
+                rec["hv_db"][idx] = v
         if "hh_db" in layers:
-            rec["hh_db"][idx] = sample_point_value(layers["hh_db"], x, y, epsg, lon, lat)
+            v = sample_point_value(layers["hh_db"], x, y, epsg, lon, lat)
+            if v is not None:
+                rec["hh_db"][idx] = v
         if "coherence" in layers:
-            rec["coh"][idx] = sample_point_value(layers["coherence"], x, y, epsg, lon, lat)
+            v = sample_point_value(layers["coherence"], x, y, epsg, lon, lat)
+            if v is not None:
+                rec["coh"][idx] = v
         if "los_disp_mm" in layers:
-            rec["disp_mm"][idx] = sample_point_value(layers["los_disp_mm"], x, y, epsg, lon, lat)
+            v = sample_point_value(layers["los_disp_mm"], x, y, epsg, lon, lat)
+            if v is not None:
+                rec["disp_mm"][idx] = v
         if "soil_moisture" in layers:
-            rec["sm"][idx] = sample_point_value(layers["soil_moisture"], x, y, epsg, lon, lat)
+            v = sample_point_value(layers["soil_moisture"], x, y, epsg, lon, lat)
+            if v is not None:
+                rec["sm"][idx] = v
 
     out_list = list(records_by_id.values())
     out_json_path.write_text(json.dumps(out_list, indent=2), encoding="utf-8")
