@@ -1,4 +1,3 @@
-%%writefile nisar_pipeline/run_site.py
 #!/usr/bin/env python3
 """
 CLI entrypoint for NISAR Space Apps preprocessing pipeline:

@@ -1,0 +1,260 @@
+# Official RAG Knowledge Base Sources for "Dancing with the SARs"
+# Only chunks + attribution links are stored in public/rag/index.json and public/rag/sources.json.
+# Run `python scripts/build_rag_index.py` to verify all URLs, build the index, and generate REFERENCES.md.
+
+sources:
+  # ---------------------------------------------------------------------------
+  # 1. NASA NISAR Societal Benefits Portal & Official Application White Papers
+  # ---------------------------------------------------------------------------
+  - id: nasa_nisar_societal_benefits
+    title: "NASA NISAR Mission - Societal Benefits Overview"
+    url: "https://science.nasa.gov/mission/nisar/societal-benefits/"
+    type: html
+    enabled: true
+    attribution: "NASA / Jet Propulsion Laboratory (JPL) - California Institute of Technology (Public Domain / 17 U.S.C. 105)"
+
+  - id: nasa_nisar_wp_fire_management
+    title: "NISAR Applications White Paper: Smart Firefighting - Fire Management"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_Applications_Fire_Management1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2017) - NISAR Societal Benefits White Paper Series"
+
+  - id: nasa_nisar_wp_forest_disturbance
+    title: "NISAR Applications White Paper: Monitoring Forest Disturbance and Timber"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_Applications_Timber_and_Forest_Disturbance.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2017) - NISAR Societal Benefits White Paper Series"
+
+  - id: nasa_nisar_wp_forest_resources
+    title: "NISAR Applications White Paper: Making Large Scale Stewardship of Forest Resources a Reality"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_Applications_Forest_Resources1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2017) - NISAR Societal Benefits White Paper Series"
+
+  - id: nasa_nisar_wp_ecosystems_ag
+    title: "NISAR Science Overview: Monitoring and Managing Our Terrestrial Ecosystems & Agriculture"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NASA_ISRO_SAR_Mission_Ecosystems1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (JPL 400-1564 Rev. 1)"
+
+  - id: nasa_nisar_wp_water_subsidence
+    title: "NISAR Science Overview: Water: Sustaining Life - Groundwater Depletion & Land Subsidence"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NASA_ISRO_SAR_Mission_Water1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (JPL 400-1598 Rev. 1)"
+
+  - id: nasa_nisar_wp_coastal_issues
+    title: "NISAR Applications White Paper: Coastal Regions and Ocean Moods (Coastal Land Loss & Deltas)"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_Applications_Coastal_Issues1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2017) - NISAR Societal Benefits White Paper Series"
+
+  - id: nasa_nisar_wp_glaciers_ice_sheets
+    title: "NISAR Applications White Paper: Glaciers, Ice Sheets, and the Oceans"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_Applications_Ice_Sheets_Glaciers_Oceans.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2017) - NISAR Societal Benefits White Paper Series"
+
+  - id: nasa_nisar_wp_cold_regions
+    title: "NISAR Science Overview: Understanding Earth's Cold Regions (Cryosphere & Glaciers)"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NASA_ISRO_SAR_Mission_ColdRegions1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech - NISAR Cryosphere Brochure"
+
+  - id: nasa_nisar_wp_damage_mapping
+    title: "NISAR Applications White Paper: Rapid Damage Assessment After Natural Disasters"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_DamageMapping.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2019) - NISAR Societal Benefits White Paper Series"
+
+  - id: nasa_nisar_wp_permafrost_fire
+    title: "NISAR Applications White Paper: Terrestrial Permafrost & Post-Fire Subsidence"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISARApplications_Permafrost1.pdf"
+    type: pdf
+    enabled: true
+    attribution: "NASA / JPL-Caltech (2019) - NISAR Societal Benefits White Paper Series"
+
+  # ---------------------------------------------------------------------------
+  # 2. ASF OpenSARLab NISAR Cookbook
+  # ---------------------------------------------------------------------------
+  - id: asf_nisar_cookbook_home
+    title: "ASF OpenSARLab NISAR Cookbook"
+    url: "https://asfopensarlab.github.io/NISAR_Cookbook/"
+    type: html
+    enabled: true
+    attribution: "Alaska Satellite Facility (ASF) OpenSARLab - BSD-3-Clause License"
+
+  # ---------------------------------------------------------------------------
+  # 3. ASF NISAR Data User Guide & Documentation
+  # ---------------------------------------------------------------------------
+  - id: asf_nisar_docs_home
+    title: "ASF NISAR Data User Guide - Overview"
+    url: "https://nisar-docs.asf.alaska.edu/"
+    type: html
+    enabled: true
+    attribution: "Alaska Satellite Facility (ASF) / NASA Earthdata"
+
+  - id: asf_nisar_docs_documents
+    title: "ASF NISAR Data User Guide - White Papers and Mission Documents Index"
+    url: "https://nisar-docs.asf.alaska.edu/documents/"
+    type: html
+    enabled: true
+    attribution: "Alaska Satellite Facility (ASF) / NASA Earthdata"
+
+  - id: asf_nisar_docs_product_specs
+    title: "ASF NISAR Data User Guide - Product Specifications"
+    url: "https://nisar-docs.asf.alaska.edu/product-specification/"
+    type: html
+    enabled: true
+    attribution: "Alaska Satellite Facility (ASF) / NASA Earthdata"
+
+  - id: asf_nisar_docs_atbd
+    title: "ASF NISAR Data User Guide - Data Processing Algorithms (ATBDs)"
+    url: "https://nisar-docs.asf.alaska.edu/atbd/"
+    type: html
+    enabled: true
+    attribution: "Alaska Satellite Facility (ASF) / NASA Earthdata"
+
+  # ---------------------------------------------------------------------------
+  # 4. NASA/JPL Mission Pages, Science Users' Handbook, Product Specs & ATBDs
+  # ---------------------------------------------------------------------------
+  - id: nasa_nisar_mission_home
+    title: "NASA NISAR Mission Official Overview"
+    url: "https://science.nasa.gov/mission/nisar/"
+    type: html
+    enabled: true
+    attribution: "NASA / Jet Propulsion Laboratory (JPL) / ISRO"
+
+  - id: nasa_nisar_data_overview
+    title: "NASA NISAR Data Overview & Sample Product Suite"
+    url: "https://science.nasa.gov/mission/nisar/data/"
+    type: html
+    enabled: true
+    attribution: "NASA / Jet Propulsion Laboratory (JPL)"
+
+  - id: nasa_nisar_handbook_page
+    title: "NASA-ISRO SAR (NISAR) Mission Science Users' Handbook Landing Page"
+    url: "https://science.nasa.gov/mission/nisar/nisar-handbook/"
+    type: html
+    enabled: true
+    attribution: "NASA Jet Propulsion Laboratory (2025, DOI: 10.48577/jpl.UD4HV3)"
+
+  - id: nasa_nisar_handbook_pdf_v1
+    title: "NASA-ISRO SAR (NISAR) Mission Science Users' Handbook (First Edition PDF)"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_FINAL_9-6-19.pdf"
+    type: pdf
+    max_pages: 45
+    enabled: true
+    attribution: "NASA Jet Propulsion Laboratory (2019) - NISAR Science Users' Handbook"
+
+  - id: nasa_nisar_utilization_plan
+    title: "NISAR Mission Utilization Plan (JPL D-102207)"
+    url: "https://assets.science.nasa.gov/content/dam/science/missions/nisar/nisar-jpl/pdf/NISAR_Utilization_Plan.pdf"
+    type: pdf
+    max_pages: 35
+    enabled: true
+    attribution: "NASA Jet Propulsion Laboratory (2018, JPL D-102207)"
+
+  - id: nisar_spec_l2_gcov
+    title: "NISAR Level-2 Geocoded Polarimetric Covariance (GCOV) Product Specification (JPL D-102274)"
+    url: "https://nisar.asf.earthdatacloud.nasa.gov/NISAR-SAMPLE-DATA/DOCS/NISAR_D-102274_RevE_NASA_SDS_Product_Specification_L2_GCOV_Nov8_2024_w-sigs.pdf"
+    type: pdf
+    max_pages: 30
+    enabled: true
+    attribution: "Shiroma, G. H. X. (2024). NASA SDS Product Specification JPL D-102274, NASA JPL"
+
+  - id: nisar_spec_l2_gunw
+    title: "NISAR Level-2 Geocoded Unwrapped Interferogram (GUNW) Product Specification (JPL D-102272)"
+    url: "https://nisar.asf.earthdatacloud.nasa.gov/NISAR-SAMPLE-DATA/DOCS/NISAR_D-102272_RevE_NASA_SDS_Product_Specification_L2_GUNW_Nov8_2024_w-sigs.pdf"
+    type: pdf
+    max_pages: 30
+    enabled: true
+    attribution: "Brancato, V., Jung, J., Huang, X., & Fattahi, H. (2024). NASA SDS Product Specification JPL D-102272, NASA JPL"
+
+  - id: nisar_spec_l2_goff
+    title: "NISAR Level-2 Geocoded Pixel Offsets (GOFF) Product Specification (JPL D-105010)"
+    url: "https://nisar.asf.earthdatacloud.nasa.gov/NISAR-SAMPLE-DATA/DOCS/NISAR_D-105010_RevC_NASA_SDS_Product_Specification_L2_GOFF_Nov8_2024_w-sigs.pdf"
+    type: pdf
+    max_pages: 25
+    enabled: true
+    attribution: "Brancato, V., Jung, J., & Huang, X. (2024). NASA SDS Product Specification JPL D-105010, NASA JPL"
+
+  - id: nisar_spec_l3_sme2
+    title: "NISAR Level-3 Soil Moisture (SME2) Product Specification (JPL D-107677)"
+    url: "https://nisar.asf.earthdatacloud.nasa.gov/NISAR-SAMPLE-DATA/DOCS/NISAR_D-107677_RevC_NASA_SDS_Product_Specification_L3_SME2_Nov8_2024_w-sigs.pdf"
+    type: pdf
+    max_pages: 25
+    enabled: true
+    attribution: "Huang, X., & Chan, S. K. (2024). NASA SDS Product Specification JPL D-107677, NASA JPL"
+
+  - id: nisar_atbd_l1_l2
+    title: "NISAR L1 and L2 Algorithm Theoretical Basis Document (ATBD JPL D-95677)"
+    url: "https://nisar.asf.earthdatacloud.nasa.gov/NISAR-SAMPLE-DATA/DOCS/NISAR_D-95677_NASA_L1_L2_ATBD_20231112_R3.4_w-sigs.pdf"
+    type: pdf
+    max_pages: 35
+    enabled: true
+    attribution: "NISAR Algorithm Development Team (2023). Techreport JPL D-95677 Rev 3.4, NASA JPL"
+
+  - id: nisar_atbd_l3_soil_moisture
+    title: "NISAR L3 Soil Moisture Data Product Algorithm Theoretical Basis Document (ATBD JPL D-107679)"
+    url: "https://nisar.asf.earthdatacloud.nasa.gov/NISAR-SAMPLE-DATA/DOCS/NISAR_D-107679_L3SM_ATBD_R3.3_20230428_w-sigs.pdf"
+    type: pdf
+    max_pages: 30
+    enabled: true
+    attribution: "NISAR Soil Moisture Science Team (2023). Techreport JPL D-107679 Rev 3.3, NASA JPL"
+
+  # ---------------------------------------------------------------------------
+  # 5. Guarded TODO Rows for Direct PDF Asset URLs Not Yet Verified
+  # ---------------------------------------------------------------------------
+  - id: todo_nisar_handbook_2nd_ed_pdf
+    title: "TODO: NASA-ISRO SAR (NISAR) Mission Science Users' Handbook (Second Edition, Oct 2025, 92.26 MB PDF)"
+    url: "TODO_VERIFY_DIRECT_PDF_URL_FROM_https://science.nasa.gov/mission/nisar/nisar-handbook/"
+    type: pdf
+    enabled: false
+    todo: true
+    attribution: "NISAR (2025). NASA-ISRO SAR Mission Science Users' Handbook, Second Edition. NASA JPL. DOI: 10.48577/jpl.UD4HV3"
+    notes: "Landing page is verified and ingested above; inspect page download link to replace URL if full 92 MB PDF ingestion is desired."
+
+  - id: todo_nisar_wp_mountain_glaciers_snow_hydrology
+    title: "TODO: NISAR Applications White Paper: Mountain Glaciers and Snow Hydrology (2023)"
+    url: "TODO_VERIFY_DIRECT_PDF_URL_FROM_https://nisar-docs.asf.alaska.edu/documents/"
+    type: pdf
+    enabled: false
+    todo: true
+    attribution: "NASA / JPL-Caltech (2023) - NISAR Application White Paper"
+    notes: "Listed on nisar-docs.asf.alaska.edu/documents/ and science.nasa.gov/mission/nisar/documents/; verify exact assets.science.nasa.gov PDF filename before enabling."
+
+  - id: todo_nisar_wp_subsidence_2017
+    title: "TODO: NISAR Applications White Paper: Subsidence (2017 2-page brief)"
+    url: "TODO_VERIFY_DIRECT_PDF_URL_FROM_https://nisar-docs.asf.alaska.edu/documents/"
+    type: pdf
+    enabled: false
+    todo: true
+    attribution: "NASA / JPL-Caltech (2017) - NISAR Application White Paper"
+    notes: "Groundwater subsidence brochure (NASA_ISRO_SAR_Mission_Water1.pdf) is enabled above; verify exact filename for the standalone 2017 Subsidence PDF on science.nasa.gov/mission/nisar/documents/."
+
+  # ---------------------------------------------------------------------------
+  # 6. Local Project Documentation (Challenge Statement & Team Methods)
+  # ---------------------------------------------------------------------------
+  - id: local_space_apps_challenge
+    title: "NASA Space Apps Challenge Statement: Dancing with the SARs"
+    url: "docs/challenge.md"
+    type: markdown
+    enabled: true
+    attribution: "NASA Space Apps Challenge Official Challenge Statement"
+
+  - id: local_team_methods
+    title: "Dancing with the SARs: Team Processing Pipeline, RVI/InSAR Methods, and Limitations"
+    url: "docs/methods.md"
+    type: markdown
+    enabled: true
+    attribution: "Dancing with the SARs Team Methodology & Limitations Documentation"
