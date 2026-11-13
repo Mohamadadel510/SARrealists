@@ -1,8 +1,8 @@
 """
 Web visualization asset exporter:
-- Reprojection from native UTM to EPSG:3857 (Web Mercator):
+- Vectorized single-warp per zoom level from native UTM to EPSG:3857 (Web Mercator):
   * Reprojects linear backscatter power BEFORE converting to dB
-  * Uses bilinear resampling for continuous layers and nearest-neighbor for class masks
+  * Uses bilinear resampling for continuous layers and nearest-neighbor for masks/RGB
 - Slippy-map 8-bit RGBA colormapped XYZ PNG tiles (`out/<site>/tiles/<layer>/<YYYYMMDD>/{z}/{x}/{y}.png`)
   and 3-band Polarimetric RGB composite XYZ tiles (`out/<site>/tiles/rgb_composite/<YYYYMMDD>/{z}/{x}/{y}.png`)
 - GeoJSON vector exporters in EPSG:4326 (`out/<site>/vectors/<name>.geojson`)
@@ -158,10 +158,13 @@ def export_xyz_png_tiles(
     tile_size: int = 256,
 ) -> int:
     """
-    Generate 8-bit colormapped XYZ PNG tiles in `EPSG:3857` at:
-      `out/<site>/tiles/<layer>/<YYYYMMDD>/{z}/{x}/{y}.png`
+    Generate 8-bit colormapped XYZ PNG tiles in `EPSG:3857` using a single vectorized
+    reproject call per zoom level (`out/<site>/tiles/<layer>/<YYYYMMDD>/{z}/{x}/{y}.png`).
     """
     src_data, x_asc, y_desc, src_transform = compute_affine_and_orient(arr, x, y)
+    if not np.any(np.isfinite(src_data)):
+        return 0
+
     src_crs = CRS.from_epsg(int(src_epsg))
     dst_crs = CRS.from_epsg(3857)
     resampling_mode = Resampling.nearest if is_mask else Resampling.bilinear
@@ -186,38 +189,52 @@ def export_xyz_png_tiles(
         x_min, y_max = _lonlat_to_tile_xy(w_lon, s_lat, z)
         x_max, y_min = _lonlat_to_tile_xy(e_lon, n_lat, z)
 
-        for tx in range(x_min, x_max + 1):
-            for ty in range(y_min, y_max + 1):
-                t_left, t_bottom, t_right, t_top = _tile_xy_to_3857_bounds(tx, ty, z)
-                tile_transform = from_bounds(
-                    t_left, t_bottom, t_right, t_top, tile_size, tile_size
-                )
-                tile_buf = np.full((tile_size, tile_size), np.nan, dtype=np.float32)
+        n_tx = x_max - x_min + 1
+        n_ty = y_max - y_min + 1
+        grid_left, _, _, grid_top = _tile_xy_to_3857_bounds(x_min, y_min, z)
+        _, grid_bottom, grid_right, _ = _tile_xy_to_3857_bounds(x_max, y_max, z)
 
-                reproject(
-                    source=src_data,
-                    destination=tile_buf,
-                    src_transform=src_transform,
-                    src_crs=src_crs,
-                    dst_transform=tile_transform,
-                    dst_crs=dst_crs,
-                    src_nodata=np.nan,
-                    dst_nodata=np.nan,
-                    resampling=resampling_mode,
-                )
+        grid_w = n_tx * tile_size
+        grid_h = n_ty * tile_size
+        grid_transform = from_bounds(
+            grid_left, grid_bottom, grid_right, grid_top, grid_w, grid_h
+        )
+        grid_buf = np.full((grid_h, grid_w), np.nan, dtype=np.float32)
 
-                if not np.any(np.isfinite(tile_buf)):
+        reproject(
+            source=src_data,
+            destination=grid_buf,
+            src_transform=src_transform,
+            src_crs=src_crs,
+            dst_transform=grid_transform,
+            dst_crs=dst_crs,
+            src_nodata=np.nan,
+            dst_nodata=np.nan,
+            resampling=resampling_mode,
+        )
+
+        if not np.any(np.isfinite(grid_buf)):
+            continue
+
+        if convert_linear_to_db_after:
+            grid_buf = linear_to_db(grid_buf)
+
+        grid_rgba = apply_fixed_colormap_rgba(
+            grid_buf, vmin=vmin, vmax=vmax, cmap_name=cmap_name
+        )
+
+        for col_idx, tx in enumerate(range(x_min, x_max + 1)):
+            c0 = col_idx * tile_size
+            c1 = c0 + tile_size
+            tx_dir = tiles_dir / str(z) / str(tx)
+            for row_idx, ty in enumerate(range(y_min, y_max + 1)):
+                r0 = row_idx * tile_size
+                r1 = r0 + tile_size
+                tile_rgba = grid_rgba[r0:r1, c0:c1]
+                if not np.any(tile_rgba[:, :, 3] > 0):
                     continue
-
-                if convert_linear_to_db_after:
-                    tile_buf = linear_to_db(tile_buf)
-
-                rgba = apply_fixed_colormap_rgba(
-                    tile_buf, vmin=vmin, vmax=vmax, cmap_name=cmap_name
-                )
-                png_path = tiles_dir / str(z) / str(tx) / f"{ty}.png"
-                png_path.parent.mkdir(parents=True, exist_ok=True)
-                mpimg.imsave(png_path, rgba)
+                tx_dir.mkdir(parents=True, exist_ok=True)
+                mpimg.imsave(tx_dir / f"{ty}.png", tile_rgba)
                 written_count += 1
 
     return written_count
@@ -234,7 +251,7 @@ def export_rgb_xyz_png_tiles(
 ) -> int:
     """
     Generate 8-bit RGBA XYZ PNG tiles in `EPSG:3857` for the 3-band `(3, H, W)`
-    Polarimetric RGB composite (`0` = transparent nodata).
+    Polarimetric RGB composite (`0` = transparent nodata) using a single warp per zoom level.
     """
     src_data, x_asc, y_desc, src_transform = compute_affine_and_orient(rgb_arr, x, y)
     src_crs = CRS.from_epsg(int(src_epsg))
@@ -260,38 +277,53 @@ def export_rgb_xyz_png_tiles(
         x_min, y_max = _lonlat_to_tile_xy(w_lon, s_lat, z)
         x_max, y_min = _lonlat_to_tile_xy(e_lon, n_lat, z)
 
-        for tx in range(x_min, x_max + 1):
-            for ty in range(y_min, y_max + 1):
-                t_left, t_bottom, t_right, t_top = _tile_xy_to_3857_bounds(tx, ty, z)
-                tile_transform = from_bounds(
-                    t_left, t_bottom, t_right, t_top, tile_size, tile_size
-                )
-                tile_rgb = np.zeros((3, tile_size, tile_size), dtype=np.uint8)
+        n_tx = x_max - x_min + 1
+        n_ty = y_max - y_min + 1
+        grid_left, _, _, grid_top = _tile_xy_to_3857_bounds(x_min, y_min, z)
+        _, grid_bottom, grid_right, _ = _tile_xy_to_3857_bounds(x_max, y_max, z)
 
-                for b_idx in range(3):
-                    reproject(
-                        source=src_data[b_idx],
-                        destination=tile_rgb[b_idx],
-                        src_transform=src_transform,
-                        src_crs=src_crs,
-                        dst_transform=tile_transform,
-                        dst_crs=dst_crs,
-                        src_nodata=0,
-                        dst_nodata=0,
-                        resampling=Resampling.nearest,
-                    )
+        grid_w = n_tx * tile_size
+        grid_h = n_ty * tile_size
+        grid_transform = from_bounds(
+            grid_left, grid_bottom, grid_right, grid_top, grid_w, grid_h
+        )
+        grid_rgb = np.zeros((3, grid_h, grid_w), dtype=np.uint8)
 
-                valid_mask = (tile_rgb[0] > 0) | (tile_rgb[1] > 0) | (tile_rgb[2] > 0)
-                if not np.any(valid_mask):
+        for b_idx in range(3):
+            reproject(
+                source=src_data[b_idx],
+                destination=grid_rgb[b_idx],
+                src_transform=src_transform,
+                src_crs=src_crs,
+                dst_transform=grid_transform,
+                dst_crs=dst_crs,
+                src_nodata=0,
+                dst_nodata=0,
+                resampling=Resampling.nearest,
+            )
+
+        valid_mask = (grid_rgb[0] > 0) | (grid_rgb[1] > 0) | (grid_rgb[2] > 0)
+        if not np.any(valid_mask):
+            continue
+
+        grid_rgba = np.zeros((grid_h, grid_w, 4), dtype=np.uint8)
+        grid_rgba[:, :, 0] = grid_rgb[0]
+        grid_rgba[:, :, 1] = grid_rgb[1]
+        grid_rgba[:, :, 2] = grid_rgb[2]
+        grid_rgba[:, :, 3] = np.where(valid_mask, 255, 0).astype(np.uint8)
+
+        for col_idx, tx in enumerate(range(x_min, x_max + 1)):
+            c0 = col_idx * tile_size
+            c1 = c0 + tile_size
+            tx_dir = tiles_dir / str(z) / str(tx)
+            for row_idx, ty in enumerate(range(y_min, y_max + 1)):
+                r0 = row_idx * tile_size
+                r1 = r0 + tile_size
+                tile_rgba = grid_rgba[r0:r1, c0:c1]
+                if not np.any(tile_rgba[:, :, 3] > 0):
                     continue
-                rgba = np.zeros((tile_size, tile_size, 4), dtype=np.uint8)
-                rgba[:, :, 0] = tile_rgb[0]
-                rgba[:, :, 1] = tile_rgb[1]
-                rgba[:, :, 2] = tile_rgb[2]
-                rgba[:, :, 3] = np.where(valid_mask, 255, 0).astype(np.uint8)
-                png_path = tiles_dir / str(z) / str(tx) / f"{ty}.png"
-                png_path.parent.mkdir(parents=True, exist_ok=True)
-                mpimg.imsave(png_path, rgba)
+                tx_dir.mkdir(parents=True, exist_ok=True)
+                mpimg.imsave(tx_dir / f"{ty}.png", tile_rgba)
                 written_count += 1
 
     return written_count
