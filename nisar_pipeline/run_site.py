@@ -55,6 +55,7 @@ from nisar_pipeline.io_nisar import (
 )
 from nisar_pipeline.layers import (
     SME2_PROJECTION,
+    SME2_QUALITY_FLAG,
     SME2_SOIL_MOISTURE,
     SME2_X,
     SME2_Y,
@@ -255,7 +256,6 @@ def build_gcov_for_site(
                 attrs={"track": rec.track, "frame": rec.frame, "direction": rec.direction},
             )
 
-            # Reproject linear power first -> then convert to dB for web tiles
             c_meta = color_cfg.get(layer_name, {})
             tiles_rel = Path("tiles") / layer_name / rec.date_str
             if layer_name == "hh_db" and co_key:
@@ -470,7 +470,6 @@ def build_gunw_for_site(
     bounds_lonlat = utm_bounds_to_lonlat(x, y, epsg)
     catalog_entries: Dict[str, Dict[str, Any]] = {}
 
-    # Export cumulative LOS displacement per date
     los_cogs: List[str] = []
     for i, d_str in enumerate(dates):
         arr = stack_res["cum_los_mm"][i]
@@ -510,7 +509,6 @@ def build_gunw_for_site(
         "direction": direction,
     }
 
-    # Export vertical displacement if flat_terrain (Nile Delta)
     if stack_res["cum_vert_mm"] is not None:
         vert_cogs: List[str] = []
         for i, d_str in enumerate(dates):
@@ -534,7 +532,6 @@ def build_gunw_for_site(
             "direction": direction,
         }
 
-    # Export linear rate COG + subsidence GeoJSON points
     rate_tag = f"{dates[0]}_{dates[-1]}"
     rate_cog_rel = Path("cog") / "disp_rate_mm_yr" / f"{rate_tag}.tif"
     write_float32_cog(stack_res["rate_mm_yr"], x, y, epsg, site_out_dir / rate_cog_rel)
@@ -678,8 +675,9 @@ def build_sme2_for_site(
     download: bool = False,
     max_dates: Optional[int] = None,
 ) -> None:
-    """Build L3 SME2 volumetric soil moisture COGs, Zarr stack, and point time series."""
+    """Build L3 SME2 volumetric soil moisture COGs, Zarr stack, tiles, and point time series."""
     require_verified_layer(SME2_SOIL_MOISTURE, product="SME2")
+    require_verified_layer(SME2_QUALITY_FLAG, product="SME2")
     site_cfg = cfg["sites"][site_name]
     bbox = site_cfg["bbox"]
     looks = int(site_cfg.get("looks", 1))
@@ -694,18 +692,26 @@ def build_sme2_for_site(
         group_records = group_records[:max_dates]
 
     sm_cogs: List[str] = []
+    sm_tiles: List[str] = []
     sm_dates: List[str] = []
     bounds_lonlat: List[float] = list(bbox)
-    epsg_code: int = int(site_cfg.get("expected_epsg") or 4326)
+    epsg_code: int = 6933
+    c_sm = color_cfg.get("soil_moisture", {})
 
-    for rec in group_records:
+    for idx, rec in enumerate(group_records):
+        logger.info("[%d/%d] Streaming SME2 window for %s", idx + 1, len(group_records), rec.file_name)
+
         def _read_sm(h5: Any) -> Any:
             x_full = h5[SME2_X][:]
             y_full = h5[SME2_Y][:]
             epsg = read_epsg_from_projection(h5[SME2_PROJECTION])
             sy, sx, _ = bbox_to_utm_slices(x_full, y_full, bbox, epsg)
             sm = np.asarray(h5[SME2_SOIL_MOISTURE][sy, sx], dtype=np.float32)
-            sm[~np.isfinite(sm) | (sm <= 0.0) | (sm > 1.0)] = np.nan
+            bad = ~np.isfinite(sm) | (sm <= 0.0) | (sm > 1.0)
+            if SME2_QUALITY_FLAG in h5:
+                qflag = np.asarray(h5[SME2_QUALITY_FLAG][sy, sx])
+                bad |= qflag != 0
+            sm[bad] = np.nan
             return block_mean(sm, looks), coord_mean(x_full[sx], looks), coord_mean(y_full[sy], looks), epsg
 
         sm_arr, x_w, y_w, epsg_code = run_with_h5_retry(
@@ -722,7 +728,20 @@ def build_sme2_for_site(
         cog_rel = Path("cog") / "soil_moisture" / f"{rec.date_str}.tif"
         write_float32_cog(sm_arr, x_w, y_w, epsg_code, site_out_dir / cog_rel)
         append_to_zarr_stack(sm_arr, x_w, y_w, epsg_code, rec.date_str, "soil_moisture", site_out_dir / "stack" / "soil_moisture.zarr")
+
+        tiles_rel = Path("tiles") / "soil_moisture" / rec.date_str
+        export_xyz_png_tiles(
+            arr=sm_arr,
+            x=x_w,
+            y=y_w,
+            src_epsg=epsg_code,
+            tiles_dir=site_out_dir / tiles_rel,
+            vmin=float(c_sm.get("vmin", 0.02)),
+            vmax=float(c_sm.get("vmax", 0.50)),
+            cmap_name=str(c_sm.get("cmap", "YlGnBu")),
+        )
         sm_cogs.append(str(cog_rel))
+        sm_tiles.append(f"{tiles_rel}/{{z}}/{{x}}/{{y}}.png")
         sm_dates.append(rec.date_str)
 
         sample_pts = site_cfg.get("sample_points", [])
@@ -737,7 +756,6 @@ def build_sme2_for_site(
                 out_json_path=site_out_dir / "timeseries" / "points.json",
             )
 
-    c_sm = color_cfg.get("soil_moisture", {})
     update_catalog_json(
         site_out_dir / "catalog.json",
         site_name,
@@ -753,6 +771,7 @@ def build_sme2_for_site(
                 "color_range": [c_sm.get("vmin", 0.02), c_sm.get("vmax", 0.50)],
                 "colormap": c_sm.get("cmap", "YlGnBu"),
                 "cog_files": sm_cogs,
+                "tile_templates": sm_tiles,
                 "zarr_stack": "stack/soil_moisture.zarr",
                 "track": track,
                 "frame": frame,

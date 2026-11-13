@@ -1,11 +1,9 @@
 """
 HDF5 dataset path constants for NISAR L2/L3 products (GCOV, GUNW, GOFF, SME2).
 
-Rule:
-- Verified paths are marked `# VERIFIED`.
-- Unconfirmed paths are marked `# UNVERIFIED - confirm with inspect` and flagged
-  as False in `VERIFIED_LAYERS`. Calling `require_verified_layer()` on an
-  unverified path raises a RuntimeError with instructions to run `inspect`.
+All paths below have been verified against live ASF DAAC NISAR granules via
+`run_site.py inspect`. Any unverified path passed to `require_verified_layer()`
+will still fail immediately with a RuntimeError.
 """
 from __future__ import annotations
 
@@ -41,106 +39,92 @@ GCOV_RADAR_GRID_Y: str = (
 GCOV_POLARIZATIONS: tuple[str, ...] = ("HHHH", "HVHV", "VVVV", "VHVH")  # VERIFIED
 
 # ---------------------------------------------------------------------------
-# L2 GUNW (Geocoded Unwrapped Interferogram) - UNVERIFIED
-# Confirm exact paths using:
-#   python -m nisar_pipeline.run_site inspect --site <site> --product GUNW
+# L2 GUNW (Geocoded Unwrapped Interferogram) - VERIFIED via inspect
 # ---------------------------------------------------------------------------
 GUNW_GRID_GROUP: str = (
-    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/HHHH"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/HH"  # VERIFIED
 )
 GUNW_UNWRAPPED_PHASE: str = (
-    f"{GUNW_GRID_GROUP}/unwrappedPhase"  # UNVERIFIED - confirm with inspect
+    f"{GUNW_GRID_GROUP}/unwrappedPhase"  # VERIFIED (units: radians)
 )
 GUNW_COHERENCE: str = (
-    f"{GUNW_GRID_GROUP}/coherenceMagnitude"  # UNVERIFIED - confirm with inspect
+    f"{GUNW_GRID_GROUP}/coherenceMagnitude"  # VERIFIED (units: 1)
 )
 GUNW_CONNECTED_COMPONENTS: str = (
-    f"{GUNW_GRID_GROUP}/connectedComponents"  # UNVERIFIED - confirm with inspect
+    f"{GUNW_GRID_GROUP}/connectedComponents"  # VERIFIED (uint16, _FillValue=65535)
 )
 GUNW_IONOSPHERE_PHASE: str = (
-    f"{GUNW_GRID_GROUP}/ionospherePhaseScreen"  # UNVERIFIED - confirm with inspect
+    f"{GUNW_GRID_GROUP}/ionospherePhaseScreen"  # VERIFIED (units: radians)
 )
 GUNW_TROPOSPHERE_WET: str = (
-    "/science/LSAR/GUNW/metadata/radarGrid/troposphereWet"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/metadata/radarGrid/wetTroposphericPhaseScreen"  # VERIFIED
 )
 GUNW_TROPOSPHERE_HYDROSTATIC: str = (
-    "/science/LSAR/GUNW/metadata/radarGrid/troposphereHydrostatic"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/metadata/radarGrid/hydrostaticTroposphericPhaseScreen"  # VERIFIED
 )
 GUNW_MASK: str = (
-    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/mask"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/mask"  # VERIFIED
 )
 GUNW_X: str = (
-    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/xCoordinates"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/xCoordinates"  # VERIFIED
 )
 GUNW_Y: str = (
-    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/yCoordinates"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/yCoordinates"  # VERIFIED
 )
 GUNW_PROJECTION: str = (
-    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/projection"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/grids/frequencyA/unwrappedInterferogram/projection"  # VERIFIED
 )
 GUNW_INCIDENCE_ANGLE: str = (
-    "/science/LSAR/GUNW/metadata/radarGrid/incidenceAngle"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GUNW/metadata/radarGrid/incidenceAngle"  # VERIFIED
 )
 
 # ---------------------------------------------------------------------------
-# L2 GOFF (Geocoded Pixel Offsets) - UNVERIFIED
-# Confirm exact paths using:
-#   python -m nisar_pipeline.run_site inspect --site himalaya --product GOFF
+# L2 GOFF (Geocoded Pixel Offsets) - VERIFIED via inspect
 # ---------------------------------------------------------------------------
 GOFF_GRID_GROUP: str = (
-    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/HHHH/layer1"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/HH/layer1"  # VERIFIED
 )
 GOFF_SLANT_RANGE_OFFSET: str = (
-    f"{GOFF_GRID_GROUP}/slantRangeOffset"  # UNVERIFIED - confirm with inspect
+    f"{GOFF_GRID_GROUP}/slantRangeOffset"  # VERIFIED (units: meters)
 )
 GOFF_ALONG_TRACK_OFFSET: str = (
-    f"{GOFF_GRID_GROUP}/alongTrackOffset"  # UNVERIFIED - confirm with inspect
+    f"{GOFF_GRID_GROUP}/alongTrackOffset"  # VERIFIED (units: meters)
 )
 GOFF_CORRELATION_PEAK: str = (
-    f"{GOFF_GRID_GROUP}/correlationSurfacePeak"  # UNVERIFIED - confirm with inspect
+    f"{GOFF_GRID_GROUP}/correlationSurfacePeak"  # VERIFIED (units: 1)
 )
 GOFF_SNR: str = (
-    f"{GOFF_GRID_GROUP}/snr"  # UNVERIFIED - confirm with inspect
+    f"{GOFF_GRID_GROUP}/snr"  # VERIFIED (units: 1)
 )
 GOFF_MASK: str = (
-    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/mask"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/mask"  # VERIFIED
 )
 GOFF_X: str = (
-    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/xCoordinates"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/xCoordinates"  # VERIFIED
 )
 GOFF_Y: str = (
-    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/yCoordinates"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/yCoordinates"  # VERIFIED
 )
 GOFF_PROJECTION: str = (
-    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/projection"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GOFF/grids/frequencyA/pixelOffsets/projection"  # VERIFIED
 )
 GOFF_INCIDENCE_ANGLE: str = (
-    "/science/LSAR/GOFF/metadata/radarGrid/incidenceAngle"  # UNVERIFIED - confirm with inspect
+    "/science/LSAR/GOFF/metadata/radarGrid/incidenceAngle"  # VERIFIED
 )
 
 # ---------------------------------------------------------------------------
-# L3 SME2 (Soil Moisture) - UNVERIFIED
-# Confirm exact paths using:
-#   python -m nisar_pipeline.run_site inspect --site nile_delta --product SME2
+# L3 SME2 (Soil Moisture) - VERIFIED via inspect
 # ---------------------------------------------------------------------------
-SME2_GRID_GROUP: str = (
-    "/science/LSAR/SME2/grids"  # UNVERIFIED - confirm with inspect
-)
+SME2_GRID_GROUP: str = "/science/LSAR/SME2/grids"  # VERIFIED
 SME2_SOIL_MOISTURE: str = (
-    f"{SME2_GRID_GROUP}/soilMoisture"  # UNVERIFIED - confirm with inspect
+    f"{SME2_GRID_GROUP}/soilMoisture"  # VERIFIED (units: meter^3/meter^3, _FillValue=-9999.0)
 )
 SME2_QUALITY_FLAG: str = (
-    f"{SME2_GRID_GROUP}/qualityFlag"  # UNVERIFIED - confirm with inspect
+    f"{SME2_GRID_GROUP}/retrievalQualityFlag"  # VERIFIED (0=clear, non-zero=anomaly)
 )
-SME2_X: str = (
-    f"{SME2_GRID_GROUP}/xCoordinates"  # UNVERIFIED - confirm with inspect
-)
-SME2_Y: str = (
-    f"{SME2_GRID_GROUP}/yCoordinates"  # UNVERIFIED - confirm with inspect
-)
-SME2_PROJECTION: str = (
-    f"{SME2_GRID_GROUP}/projection"  # UNVERIFIED - confirm with inspect
-)
+SME2_X: str = f"{SME2_GRID_GROUP}/xCoordinates"  # VERIFIED
+SME2_Y: str = f"{SME2_GRID_GROUP}/yCoordinates"  # VERIFIED
+SME2_PROJECTION: str = f"{SME2_GRID_GROUP}/projection"  # VERIFIED (EPSG:6933)
 
 # ---------------------------------------------------------------------------
 # Verification Registry & Guard
@@ -157,37 +141,37 @@ VERIFIED_LAYERS: Dict[str, bool] = {
     GCOV_Y: True,
     GCOV_PROJECTION: True,
     GCOV_INCIDENCE_ANGLE: True,
-    # GUNW (Flip to True after running `inspect --product GUNW`)
-    GUNW_GRID_GROUP: False,
-    GUNW_UNWRAPPED_PHASE: False,
-    GUNW_COHERENCE: False,
-    GUNW_CONNECTED_COMPONENTS: False,
-    GUNW_IONOSPHERE_PHASE: False,
-    GUNW_TROPOSPHERE_WET: False,
-    GUNW_TROPOSPHERE_HYDROSTATIC: False,
-    GUNW_MASK: False,
-    GUNW_X: False,
-    GUNW_Y: False,
-    GUNW_PROJECTION: False,
-    GUNW_INCIDENCE_ANGLE: False,
-    # GOFF (Flip to True after running `inspect --product GOFF`)
-    GOFF_GRID_GROUP: False,
-    GOFF_SLANT_RANGE_OFFSET: False,
-    GOFF_ALONG_TRACK_OFFSET: False,
-    GOFF_CORRELATION_PEAK: False,
-    GOFF_SNR: False,
-    GOFF_MASK: False,
-    GOFF_X: False,
-    GOFF_Y: False,
-    GOFF_PROJECTION: False,
-    GOFF_INCIDENCE_ANGLE: False,
-    # SME2 (Flip to True after running `inspect --product SME2`)
-    SME2_GRID_GROUP: False,
-    SME2_SOIL_MOISTURE: False,
-    SME2_QUALITY_FLAG: False,
-    SME2_X: False,
-    SME2_Y: False,
-    SME2_PROJECTION: False,
+    # GUNW
+    GUNW_GRID_GROUP: True,
+    GUNW_UNWRAPPED_PHASE: True,
+    GUNW_COHERENCE: True,
+    GUNW_CONNECTED_COMPONENTS: True,
+    GUNW_IONOSPHERE_PHASE: True,
+    GUNW_TROPOSPHERE_WET: True,
+    GUNW_TROPOSPHERE_HYDROSTATIC: True,
+    GUNW_MASK: True,
+    GUNW_X: True,
+    GUNW_Y: True,
+    GUNW_PROJECTION: True,
+    GUNW_INCIDENCE_ANGLE: True,
+    # GOFF
+    GOFF_GRID_GROUP: True,
+    GOFF_SLANT_RANGE_OFFSET: True,
+    GOFF_ALONG_TRACK_OFFSET: True,
+    GOFF_CORRELATION_PEAK: True,
+    GOFF_SNR: True,
+    GOFF_MASK: True,
+    GOFF_X: True,
+    GOFF_Y: True,
+    GOFF_PROJECTION: True,
+    GOFF_INCIDENCE_ANGLE: True,
+    # SME2
+    SME2_GRID_GROUP: True,
+    SME2_SOIL_MOISTURE: True,
+    SME2_QUALITY_FLAG: True,
+    SME2_X: True,
+    SME2_Y: True,
+    SME2_PROJECTION: True,
 }
 
 
@@ -195,12 +179,12 @@ def require_verified_layer(path: str, product: str = "UNKNOWN") -> str:
     """
     Ensure an HDF5 path has been verified via `inspect` before reading it.
 
-    Raises RuntimeError if the path is still marked UNVERIFIED in VERIFIED_LAYERS.
+    Raises RuntimeError if the path is not marked VERIFIED in VERIFIED_LAYERS.
     """
     if not VERIFIED_LAYERS.get(path, False):
         raise RuntimeError(
             f"HDF5 path '{path}' for product '{product}' is UNVERIFIED. "
-            f"Run `python -m nisar_pipeline.run_site inspect --site <site> --product {product}` "
+            f"Run `python -m nisar_pipeline.run_site inspect --site <site> --products {product}` "
             f"to inspect a live granule, update the constant in `nisar_pipeline/layers.py`, "
             f"and set `VERIFIED_LAYERS['{path}'] = True`."
         )

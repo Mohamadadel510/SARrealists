@@ -141,10 +141,11 @@ def load_goff_window(
 
     mask_ml: Optional[np.ndarray] = None
     if GOFF_MASK in h5:
-        raw_mask = np.asarray(h5[GOFF_MASK][slice_y, slice_x], dtype=np.uint8)
-        valid &= is_valid_mask_array(raw_mask, invalid_mask_values)
-        mask_ml = block_mask_nearest(raw_mask, looks)
-
+        raw_mask_u32 = np.asarray(h5[GOFF_MASK][slice_y, slice_x])
+        low_byte = (raw_mask_u32 & 0xFF).astype(np.uint8)
+        valid &= is_valid_mask_array(low_byte, invalid_mask_values)
+        mask_ml = block_mask_nearest(low_byte, looks)
+        
     sr_masked = np.where(valid, sr_off, np.nan).astype(np.float32)
     az_masked = np.where(valid, az_off, np.nan).astype(np.float32)
     qual_masked = np.where(np.isfinite(qual), qual, np.nan).astype(np.float32)

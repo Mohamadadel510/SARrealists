@@ -293,8 +293,9 @@ def test_deduplication_and_unverified_guard() -> None:
     assert len(deduped) == 1
     assert deduped[0].version_tag == "R04000_002"
 
+    assert require_verified_layer(GUNW_UNWRAPPED_PHASE, product="GUNW") == GUNW_UNWRAPPED_PHASE
     with pytest.raises(RuntimeError, match="is UNVERIFIED"):
-        require_verified_layer(GUNW_UNWRAPPED_PHASE, product="GUNW")
+        require_verified_layer("/science/LSAR/UNKNOWN/unverifiedDataset", product="TEST")
 def test_gunw_los_vertical_and_robust_rate() -> None:
     """Verify GUNW LOS formula (-phase*lambda/(4*pi)), flat-site vertical check, and rate fit."""
     from nisar_pipeline.gunw import (

@@ -203,16 +203,18 @@ def load_gunw_window(
     valid_mask = np.isfinite(phase) & np.isfinite(coh) & (coh >= float(coherence_threshold))
 
     mask_ml: Optional[np.ndarray] = None
+    mask_ml: Optional[np.ndarray] = None
     if GUNW_MASK in h5:
-        raw_mask = np.asarray(h5[GUNW_MASK][slice_y, slice_x], dtype=np.uint8)
-        valid_mask &= is_valid_mask_array(raw_mask, invalid_mask_values)
-        mask_ml = block_mask_nearest(raw_mask, looks)
+        raw_mask_u32 = np.asarray(h5[GUNW_MASK][slice_y, slice_x])
+        low_byte = (raw_mask_u32 & 0xFF).astype(np.uint8)
+        valid_mask &= is_valid_mask_array(low_byte, invalid_mask_values)
+        mask_ml = block_mask_nearest(low_byte, looks)
 
     conn_ml: Optional[np.ndarray] = None
     if GUNW_CONNECTED_COMPONENTS in h5:
         conn = np.asarray(h5[GUNW_CONNECTED_COMPONENTS][slice_y, slice_x])
-        valid_mask &= np.isfinite(conn) & (conn > 0)
-        conn_ml = block_mask_nearest(conn.astype(np.uint8), looks)
+        valid_mask &= np.isfinite(conn) & (conn > 0) & (conn < 65535)
+        conn_ml = block_mask_nearest(np.clip(conn, 0, 255).astype(np.uint8), looks)
 
     phase_masked = np.where(valid_mask, phase, np.nan).astype(np.float32)
     coh_masked = np.where(np.isfinite(coh) & (coh >= 0.0), coh, np.nan).astype(np.float32)
