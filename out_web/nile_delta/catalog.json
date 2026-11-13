@@ -1,0 +1,846 @@
+{
+  "site": "nile_delta",
+  "title": "Whole Nile Delta (Cairo Apex to Mediterranean, Alexandria to Port Said)",
+  "updated_utc": "2026-11-13T14:02:07Z",
+  "timestamps": [
+    "20251216",
+    "20260626",
+    "20260708",
+    "20260720",
+    "20260813",
+    "20260825",
+    "20260906",
+    "20260930",
+    "20261012",
+    "20261024"
+  ],
+  "default_timestamp": "20261024",
+  "layers": {
+    "hh_db": {
+      "id": "hh_db",
+      "title": "Surface Roughness & Moisture (HH Co-Pol)",
+      "units": "dB",
+      "dates": [
+        "20260626",
+        "20260720",
+        "20260825",
+        "20260930",
+        "20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -22.0,
+        0.0
+      ],
+      "colormap": "gray",
+      "cog_files": [
+        "cog/hh_db/20260626.tif",
+        "cog/hh_db/20260720.tif",
+        "cog/hh_db/20260825.tif",
+        "cog/hh_db/20260930.tif",
+        "cog/hh_db/20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/hh_db/20260626/{z}/{x}/{y}.png",
+        "tiles/hh_db/20260720/{z}/{x}/{y}.png",
+        "tiles/hh_db/20260825/{z}/{x}/{y}.png",
+        "tiles/hh_db/20260930/{z}/{x}/{y}.png",
+        "tiles/hh_db/20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/hh_db/20260626.png",
+        "plots/monthly/hh_db/20260720.png",
+        "plots/monthly/hh_db/20260825.png",
+        "plots/monthly/hh_db/20260930.png",
+        "plots/monthly/hh_db/20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626": "DUAL_POL",
+        "20260720": "DUAL_POL",
+        "20260825": "DUAL_POL",
+        "20260930": "DUAL_POL",
+        "20261024": "DUAL_POL"
+      },
+      "zarr_stack": "stack/hh_db.zarr",
+      "friendly_title": "Surface Roughness & Moisture (HH Co-Pol)",
+      "what_it_shows": "Dark = Calm Water / Flat Sand | Bright = Wet Fields, Canals & Buildings",
+      "legend_stops": [
+        {
+          "value": -22.0,
+          "label": "Calm Water / Flat Sand [-22 dB]"
+        },
+        {
+          "value": -15.0,
+          "label": "Dry / Smooth Soil [-15 dB]"
+        },
+        {
+          "value": -8.0,
+          "label": "Moist Fields / Rough Ground [-8 dB]"
+        },
+        {
+          "value": 0.0,
+          "label": "Buildings / Canal Banks [0 dB]"
+        }
+      ]
+    },
+    "hv_db": {
+      "id": "hv_db",
+      "title": "Cross-Pol Backscatter: Crop Volume & Structures (HV)",
+      "units": "dB",
+      "dates": [
+        "20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -30.0,
+        -8.0
+      ],
+      "colormap": "YlGn",
+      "cog_files": [
+        "cog/hv_db/20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/hv_db/20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/hv_db/20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626": "DUAL_POL",
+        "20260720": "DUAL_POL",
+        "20260825": "DUAL_POL",
+        "20260930": "DUAL_POL",
+        "20261024": "DUAL_POL"
+      },
+      "zarr_stack": "stack/hv_db.zarr",
+      "friendly_title": "Cross-Pol Backscatter: Crop Volume & Structures (HV)",
+      "what_it_shows": "Dark = Water / Bare Sand | Mid Green = Irrigated Crops | Darkest Green = Orchards & Rotated Village Buildings",
+      "legend_stops": [
+        {
+          "value": -30.0,
+          "label": "Water / Bare Soil [-30 dB]"
+        },
+        {
+          "value": -22.0,
+          "label": "Young / Sparse Crops [-22 dB]"
+        },
+        {
+          "value": -15.0,
+          "label": "Dense Irrigated Field Crops [-15 dB]"
+        },
+        {
+          "value": -8.0,
+          "label": "Orchards / Village Corner Bounce [-8 dB]"
+        }
+      ]
+    },
+    "rvi": {
+      "id": "rvi",
+      "title": "Radar Vegetation Health Index (Dual-Pol RVI)",
+      "units": "unitless",
+      "dates": [
+        "20260626",
+        "20260720",
+        "20260825",
+        "20260930",
+        "20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        0.0,
+        1.0
+      ],
+      "colormap": "YlGn",
+      "cog_files": [
+        "cog/rvi/20260626.tif",
+        "cog/rvi/20260720.tif",
+        "cog/rvi/20260825.tif",
+        "cog/rvi/20260930.tif",
+        "cog/rvi/20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/rvi/20260626/{z}/{x}/{y}.png",
+        "tiles/rvi/20260720/{z}/{x}/{y}.png",
+        "tiles/rvi/20260825/{z}/{x}/{y}.png",
+        "tiles/rvi/20260930/{z}/{x}/{y}.png",
+        "tiles/rvi/20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/rvi/20260626.png",
+        "plots/monthly/rvi/20260720.png",
+        "plots/monthly/rvi/20260825.png",
+        "plots/monthly/rvi/20260930.png",
+        "plots/monthly/rvi/20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626": "DUAL_POL",
+        "20260720": "DUAL_POL",
+        "20260825": "DUAL_POL",
+        "20260930": "DUAL_POL",
+        "20261024": "DUAL_POL"
+      },
+      "zarr_stack": "stack/rvi.zarr",
+      "friendly_title": "Radar Vegetation Health Index (Dual-Pol RVI)",
+      "what_it_shows": "Combines HH + HV to separate bare ground/cities from true crop biomass",
+      "legend_stops": [
+        {
+          "value": 0.0,
+          "label": "Bare Ground / Water / Buildings [0.0]"
+        },
+        {
+          "value": 0.35,
+          "label": "Light Vegetation [0.35]"
+        },
+        {
+          "value": 0.7,
+          "label": "Healthy Crop Cover [0.70]"
+        },
+        {
+          "value": 1.0,
+          "label": "Dense Canopy Biomass [1.0]"
+        }
+      ]
+    },
+    "pol_ratio_db": {
+      "id": "pol_ratio_db",
+      "title": "Canopy-to-Surface Scattering Ratio (HV/HH)",
+      "units": "dB",
+      "dates": [
+        "20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -15.0,
+        -2.0
+      ],
+      "colormap": "viridis",
+      "cog_files": [
+        "cog/pol_ratio_db/20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/pol_ratio_db/20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/pol_ratio_db/20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626": "DUAL_POL",
+        "20260720": "DUAL_POL",
+        "20260825": "DUAL_POL",
+        "20260930": "DUAL_POL",
+        "20261024": "DUAL_POL"
+      },
+      "zarr_stack": "stack/pol_ratio_db.zarr",
+      "friendly_title": "Canopy-to-Surface Scattering Ratio (HV / HH)",
+      "what_it_shows": "Low = Flat Surface Bounce Dominates | High = Canopy Volume Bounce Dominates",
+      "legend_stops": [
+        {
+          "value": -15.0,
+          "label": "Bare Surface Bounce [-15 dB]"
+        },
+        {
+          "value": -8.5,
+          "label": "Mixed Soil & Plants [-8.5 dB]"
+        },
+        {
+          "value": -2.0,
+          "label": "Pure Canopy Bounce [-2 dB]"
+        }
+      ]
+    },
+    "freq_diff_db": {
+      "id": "freq_diff_db",
+      "title": "Dual-Frequency Difference (Freq A - Freq B)",
+      "units": "dB",
+      "dates": [
+        "20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -4.0,
+        4.0
+      ],
+      "colormap": "coolwarm",
+      "cog_files": [
+        "cog/freq_diff_db/20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/freq_diff_db/20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/freq_diff_db/20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626": "DUAL_POL",
+        "20260720": "DUAL_POL",
+        "20260825": "DUAL_POL",
+        "20260930": "DUAL_POL",
+        "20261024": "DUAL_POL"
+      },
+      "zarr_stack": "stack/freq_diff_db.zarr",
+      "friendly_title": "Dual-Frequency Split-Spectrum Difference (Freq A - Freq B)",
+      "what_it_shows": "Compares High-Res Frequency A vs. Coarser 5 MHz Frequency B Sub-Band",
+      "legend_stops": [
+        {
+          "value": -4.0,
+          "label": "Freq B Stronger Bounce [-4 dB]"
+        },
+        {
+          "value": -2.0,
+          "label": "Slightly Stronger in Freq B [-2 dB]"
+        },
+        {
+          "value": 0.0,
+          "label": "Equal Bounce in Both Bands [0 dB]"
+        },
+        {
+          "value": 2.0,
+          "label": "Slightly Stronger in Freq A [+2 dB]"
+        },
+        {
+          "value": 4.0,
+          "label": "Freq A Stronger (Fine Edges) [+4 dB]"
+        }
+      ]
+    },
+    "rgb_composite": {
+      "id": "rgb_composite",
+      "title": "Polarimetric SAR RGB Composite (Green=Crops, Magenta=Cities)",
+      "units": "uint8_rgb",
+      "dates": [
+        "20260626",
+        "20260720",
+        "20260825",
+        "20260930",
+        "20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        0.0,
+        255.0
+      ],
+      "colormap": "rgb",
+      "cog_files": [
+        "cog/rgb_composite/20260626.tif",
+        "cog/rgb_composite/20260720.tif",
+        "cog/rgb_composite/20260825.tif",
+        "cog/rgb_composite/20260930.tif",
+        "cog/rgb_composite/20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/rgb_composite/20260626/{z}/{x}/{y}.png",
+        "tiles/rgb_composite/20260720/{z}/{x}/{y}.png",
+        "tiles/rgb_composite/20260825/{z}/{x}/{y}.png",
+        "tiles/rgb_composite/20260930/{z}/{x}/{y}.png",
+        "tiles/rgb_composite/20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/rgb_composite/20260626.png",
+        "plots/monthly/rgb_composite/20260720.png",
+        "plots/monthly/rgb_composite/20260825.png",
+        "plots/monthly/rgb_composite/20260930.png",
+        "plots/monthly/rgb_composite/20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626": "DUAL_POL",
+        "20260720": "DUAL_POL",
+        "20260825": "DUAL_POL",
+        "20260930": "DUAL_POL",
+        "20261024": "DUAL_POL"
+      },
+      "friendly_title": "Polarimetric SAR RGB Composite (Green=Crops, Magenta=Cities)",
+      "what_it_shows": "Green = Irrigated Crops & Trees | Magenta/Pink = Cities & Villages | Dark = Water",
+      "legend_stops": []
+    },
+    "hv_db_change": {
+      "id": "hv_db_change",
+      "title": "Wildfire Burn & Canopy Change (Post - Pre HV)",
+      "units": "dB",
+      "dates": [
+        "20260626_20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -6.0,
+        6.0
+      ],
+      "colormap": "RdBu",
+      "cog_files": [
+        "cog/hv_db_change/20260626_20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/hv_db_change/20260626_20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/hv_db_change/20260626_20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626_20261024": "DUAL_POL"
+      },
+      "friendly_title": "Wildfire Burn & Canopy Change (Post vs. Pre HV)",
+      "what_it_shows": "Red = Burned Trees / Harvested Crops | Blue = New Growth / Structure",
+      "legend_stops": [
+        {
+          "value": -6.0,
+          "label": "Severe Burn / Canopy Loss [-6 dB]"
+        },
+        {
+          "value": -3.0,
+          "label": "Moderate Vegetation Drop [-3 dB]"
+        },
+        {
+          "value": 0.0,
+          "label": "No Change [0 dB]"
+        },
+        {
+          "value": 3.0,
+          "label": "Vegetation Growth [+3 dB]"
+        },
+        {
+          "value": 6.0,
+          "label": "Strong Regrowth / Wetting [+6 dB]"
+        }
+      ]
+    },
+    "hh_db_change": {
+      "id": "hh_db_change",
+      "title": "Surface Moisture & Flood Change (Post - Pre HH)",
+      "units": "dB",
+      "dates": [
+        "20260626_20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -6.0,
+        6.0
+      ],
+      "colormap": "RdBu",
+      "cog_files": [
+        "cog/hh_db_change/20260626_20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/hh_db_change/20260626_20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/hh_db_change/20260626_20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626_20261024": "DUAL_POL"
+      },
+      "friendly_title": "Surface Moisture & Flood Change (Post vs. Pre HH)",
+      "what_it_shows": "Red = Drying or Smooth Floodwater | Blue = Soil Wetting / Plowing",
+      "legend_stops": [
+        {
+          "value": -6.0,
+          "label": "Standing Floodwater / Drying [-6 dB]"
+        },
+        {
+          "value": 0.0,
+          "label": "Unchanged Surface [0 dB]"
+        },
+        {
+          "value": 6.0,
+          "label": "Increased Moisture / Roughness [+6 dB]"
+        }
+      ]
+    },
+    "rvi_change": {
+      "id": "rvi_change",
+      "title": "Biomass & Crop Cover Change (Post - Pre RVI)",
+      "units": "unitless",
+      "dates": [
+        "20260626_20261024"
+      ],
+      "bounds": [
+        29.797777,
+        29.965094,
+        32.261678,
+        31.636316
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -0.4,
+        0.4
+      ],
+      "colormap": "RdBu",
+      "cog_files": [
+        "cog/rvi_change/20260626_20261024.tif"
+      ],
+      "tile_templates": [
+        "tiles/rvi_change/20260626_20261024/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/rvi_change/20260626_20261024.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "polarization_flags": {
+        "20260626_20261024": "DUAL_POL"
+      },
+      "friendly_title": "Biomass & Crop Cover Change (Post vs. Pre RVI)",
+      "what_it_shows": "Red = Biomass Loss (Fire / Harvest) | Blue = Crop Growth",
+      "legend_stops": [
+        {
+          "value": -0.4,
+          "label": "Canopy Destroyed / Harvested [-0.4]"
+        },
+        {
+          "value": 0.0,
+          "label": "Stable Vegetation [0.0]"
+        },
+        {
+          "value": 0.4,
+          "label": "Rapid Crop Growth [+0.4]"
+        }
+      ]
+    },
+    "los_disp_mm": {
+      "id": "los_disp_mm",
+      "title": "Ground Sinking / Uplift Along Radar Beam",
+      "units": "mm",
+      "dates": [
+        "20260626",
+        "20260626",
+        "20260708",
+        "20260813",
+        "20260906"
+      ],
+      "bounds": [
+        29.800498,
+        29.969751,
+        32.254282,
+        31.633655
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -100.0,
+        100.0
+      ],
+      "colormap": "RdBu_r",
+      "cog_files": [
+        "cog/los_disp_mm/20260626.tif",
+        "cog/los_disp_mm/20260626.tif",
+        "cog/los_disp_mm/20260708.tif",
+        "cog/los_disp_mm/20260813.tif",
+        "cog/los_disp_mm/20260906.tif"
+      ],
+      "tile_templates": [
+        "tiles/los_disp_mm/20260626/{z}/{x}/{y}.png",
+        "tiles/los_disp_mm/20260626/{z}/{x}/{y}.png",
+        "tiles/los_disp_mm/20260708/{z}/{x}/{y}.png",
+        "tiles/los_disp_mm/20260813/{z}/{x}/{y}.png",
+        "tiles/los_disp_mm/20260906/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/los_disp_mm/20260626.png",
+        "plots/monthly/los_disp_mm/20260626.png",
+        "plots/monthly/los_disp_mm/20260708.png",
+        "plots/monthly/los_disp_mm/20260813.png",
+        "plots/monthly/los_disp_mm/20260906.png"
+      ],
+      "zarr_stack": "stack/los_disp_mm.zarr",
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "friendly_title": "Ground Sinking / Uplift Along Radar Beam",
+      "what_it_shows": "Blue = Ground Sinking (Subsidence) | Red = Ground Rising (Uplift)",
+      "legend_stops": [
+        {
+          "value": -100.0,
+          "label": "Strong Sinking [-100 mm]"
+        },
+        {
+          "value": -50.0,
+          "label": "Moderate Sinking [-50 mm]"
+        },
+        {
+          "value": 0.0,
+          "label": "Stable Ground [0 mm]"
+        },
+        {
+          "value": 50.0,
+          "label": "Moderate Uplift [+50 mm]"
+        },
+        {
+          "value": 100.0,
+          "label": "Strong Uplift [+100 mm]"
+        }
+      ]
+    },
+    "vert_disp_mm": {
+      "id": "vert_disp_mm",
+      "title": "Vertical Land Subsidence",
+      "units": "mm",
+      "dates": [
+        "20260626",
+        "20260626",
+        "20260708",
+        "20260813",
+        "20260906"
+      ],
+      "bounds": [
+        29.800498,
+        29.969751,
+        32.254282,
+        31.633655
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -120.0,
+        120.0
+      ],
+      "colormap": "RdBu_r",
+      "cog_files": [
+        "cog/vert_disp_mm/20260626.tif",
+        "cog/vert_disp_mm/20260626.tif",
+        "cog/vert_disp_mm/20260708.tif",
+        "cog/vert_disp_mm/20260813.tif",
+        "cog/vert_disp_mm/20260906.tif"
+      ],
+      "tile_templates": [
+        "tiles/vert_disp_mm/20260626/{z}/{x}/{y}.png",
+        "tiles/vert_disp_mm/20260626/{z}/{x}/{y}.png",
+        "tiles/vert_disp_mm/20260708/{z}/{x}/{y}.png",
+        "tiles/vert_disp_mm/20260813/{z}/{x}/{y}.png",
+        "tiles/vert_disp_mm/20260906/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/vert_disp_mm/20260626.png",
+        "plots/monthly/vert_disp_mm/20260626.png",
+        "plots/monthly/vert_disp_mm/20260708.png",
+        "plots/monthly/vert_disp_mm/20260813.png",
+        "plots/monthly/vert_disp_mm/20260906.png"
+      ],
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "friendly_title": "Vertical Land Subsidence",
+      "what_it_shows": "Total vertical ground movement relative to stable reference area",
+      "legend_stops": [
+        {
+          "value": -120.0,
+          "label": "Severe Subsidence [-120 mm]"
+        },
+        {
+          "value": -60.0,
+          "label": "Moderate Sinking [-60 mm]"
+        },
+        {
+          "value": 0.0,
+          "label": "Stable Ground [0 mm]"
+        },
+        {
+          "value": 60.0,
+          "label": "Slight Uplift [+60 mm]"
+        },
+        {
+          "value": 120.0,
+          "label": "Strong Uplift [+120 mm]"
+        }
+      ]
+    },
+    "disp_rate_mm_yr": {
+      "id": "disp_rate_mm_yr",
+      "title": "Annual Land Sinking Speed",
+      "units": "mm/yr",
+      "dates": [
+        "20260626_20260906"
+      ],
+      "bounds": [
+        29.800498,
+        29.969751,
+        32.254282,
+        31.633655
+      ],
+      "crs": "EPSG:32636",
+      "color_range": [
+        -50.0,
+        50.0
+      ],
+      "colormap": "RdBu_r",
+      "cog_files": [
+        "cog/disp_rate_mm_yr/20260626_20260906.tif"
+      ],
+      "tile_templates": [
+        "tiles/disp_rate_mm_yr/20260626_20260906/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/disp_rate_mm_yr/20260626_20260906.png"
+      ],
+      "vector_file": "vectors/subsidence_rates.geojson",
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "friendly_title": "Annual Land Sinking Speed",
+      "what_it_shows": "Long-term ground sinking or rising trend per year",
+      "legend_stops": [
+        {
+          "value": -50.0,
+          "label": "Fast Sinking [-50 mm/yr]"
+        },
+        {
+          "value": -25.0,
+          "label": "Moderate Sinking [-25 mm/yr]"
+        },
+        {
+          "value": 0.0,
+          "label": "Stable Ground [0 mm/yr]"
+        },
+        {
+          "value": 25.0,
+          "label": "Moderate Rising [+25 mm/yr]"
+        },
+        {
+          "value": 50.0,
+          "label": "Fast Rising [+50 mm/yr]"
+        }
+      ]
+    },
+    "soil_moisture": {
+      "id": "soil_moisture",
+      "title": "Root-Zone Volumetric Soil Moisture",
+      "units": "m3/m3",
+      "dates": [
+        "20251216",
+        "20260626",
+        "20260720",
+        "20260825",
+        "20260930",
+        "20261012"
+      ],
+      "bounds": [
+        29.858921,
+        30.02061,
+        32.232365,
+        31.593575
+      ],
+      "crs": "EPSG:6933",
+      "color_range": [
+        0.02,
+        0.5
+      ],
+      "colormap": "YlGnBu",
+      "cog_files": [
+        "cog/soil_moisture/20251216.tif",
+        "cog/soil_moisture/20260626.tif",
+        "cog/soil_moisture/20260720.tif",
+        "cog/soil_moisture/20260825.tif",
+        "cog/soil_moisture/20260930.tif",
+        "cog/soil_moisture/20261012.tif"
+      ],
+      "tile_templates": [
+        "tiles/soil_moisture/20251216/{z}/{x}/{y}.png",
+        "tiles/soil_moisture/20260626/{z}/{x}/{y}.png",
+        "tiles/soil_moisture/20260720/{z}/{x}/{y}.png",
+        "tiles/soil_moisture/20260825/{z}/{x}/{y}.png",
+        "tiles/soil_moisture/20260930/{z}/{x}/{y}.png",
+        "tiles/soil_moisture/20261012/{z}/{x}/{y}.png"
+      ],
+      "monthly_pngs": [
+        "plots/monthly/soil_moisture/20251216.png",
+        "plots/monthly/soil_moisture/20260626.png",
+        "plots/monthly/soil_moisture/20260720.png",
+        "plots/monthly/soil_moisture/20260825.png",
+        "plots/monthly/soil_moisture/20260930.png",
+        "plots/monthly/soil_moisture/20261012.png"
+      ],
+      "zarr_stack": "stack/soil_moisture.zarr",
+      "track": 7,
+      "frame": 73,
+      "direction": "D",
+      "friendly_title": "Root-Zone Soil Moisture (L3 SME2)",
+      "what_it_shows": "Fraction of soil volume filled with water in top 5 cm",
+      "legend_stops": [
+        {
+          "value": 0.02,
+          "label": "Dry Desert / Fallow (2% [0.02 m\u00b3/m\u00b3])"
+        },
+        {
+          "value": 0.18,
+          "label": "Damp Soil (18% [0.18 m\u00b3/m\u00b3])"
+        },
+        {
+          "value": 0.34,
+          "label": "Moist Irrigated Field (34% [0.34 m\u00b3/m\u00b3])"
+        },
+        {
+          "value": 0.5,
+          "label": "Saturated / Flooded (50% [0.50 m\u00b3/m\u00b3])"
+        }
+      ]
+    }
+  }
+}
