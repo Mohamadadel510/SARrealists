@@ -3,7 +3,8 @@
 CLI entrypoint for NISAR Space Apps preprocessing pipeline:
   python -m nisar_pipeline.run_site search  --site california --products GCOV GUNW
   python -m nisar_pipeline.run_site inspect --site nile_delta --products GUNW --idx 0
-  python -m nisar_pipeline.run_site build   --site california --products GCOV --max-dates 4
+  python -m nisar_pipeline.run_site build   --site nile_delta --products GCOV --max-dates 2
+  python -m nisar_pipeline.run_site plot    --site nile_delta
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from pyproj import Transformer
 import yaml
 
 from nisar_pipeline.export_web import (
+    export_rgb_xyz_png_tiles,
     export_subsidence_points_geojson,
     export_velocity_vectors_geojson,
     export_xyz_png_tiles,
@@ -31,6 +33,7 @@ from nisar_pipeline.gcov import (
     resolve_co_cross_pols,
     update_points_timeseries_json,
     write_float32_cog,
+    write_rgb_cog,
 )
 from nisar_pipeline.goff import (
     GOFFWindow,
@@ -60,6 +63,11 @@ from nisar_pipeline.layers import (
     SME2_X,
     SME2_Y,
     require_verified_layer,
+)
+from nisar_pipeline.plots import (
+    enrich_catalog_with_human_labels,
+    plot_human_friendly_guide,
+    plot_pol_and_freq_explorer,
 )
 from nisar_pipeline.window import (
     GCOVWindow,
@@ -102,7 +110,7 @@ def update_catalog_json(
     site_title: str,
     layer_entries: Dict[str, Dict[str, Any]],
 ) -> Path:
-    """Create or update `out/<site>/catalog.json` with metadata for every generated layer."""
+    """Create or update `out/<site>/catalog.json` and enrich with plain-English legend labels."""
     catalog_path.parent.mkdir(parents=True, exist_ok=True)
     catalog: Dict[str, Any] = {
         "site": site_name,
@@ -122,6 +130,7 @@ def update_catalog_json(
         catalog["layers"][layer_id] = entry
 
     catalog_path.write_text(json.dumps(catalog, indent=2), encoding="utf-8")
+    enrich_catalog_with_human_labels(catalog_path)
     return catalog_path
 
 
@@ -133,7 +142,10 @@ def build_gcov_for_site(
     download: bool = False,
     max_dates: Optional[int] = None,
 ) -> None:
-    """Build GCOV COGs, Zarr stacks, EPSG:3857 XYZ PNG tiles, point time series, and catalog."""
+    """
+    Build GCOV float32 COGs, 3-band Polarimetric RGB COGs, Dual-Frequency (`Freq A - Freq B`)
+    COGs, Zarr stacks, EPSG:3857 XYZ PNG tiles, point time series, catalog, and diagnostic plots.
+    """
     site_cfg = cfg["sites"][site_name]
     bbox = site_cfg["bbox"]
     looks = int(site_cfg.get("looks", 2))
@@ -159,6 +171,7 @@ def build_gcov_for_site(
 
     first_window: Optional[GCOVWindow] = None
     last_window: Optional[GCOVWindow] = None
+    last_prod: Optional[Dict[str, Any]] = None
     bounds_lonlat: List[float] = list(bbox)
     epsg_code: int = int(site_cfg.get("expected_epsg") or 4326)
 
@@ -167,6 +180,8 @@ def build_gcov_for_site(
         "hv_db": [],
         "rvi": [],
         "pol_ratio_db": [],
+        "freq_diff_db": [],
+        "rgb_composite": [],
     }
     layer_cog_paths: Dict[str, List[str]] = {k: [] for k in layer_dates}
     layer_tile_templates: Dict[str, List[str]] = {k: [] for k in layer_dates}
@@ -229,6 +244,9 @@ def build_gcov_for_site(
         pol_flags_by_date[rec.date_str] = prod["polarization_flag"]
 
         for layer_name, arr in prod["layers"].items():
+            if layer_name == "freq_diff_db" and not prod["has_dual_freq"]:
+                continue
+
             cog_rel = Path("cog") / layer_name / f"{rec.date_str}.tif"
             write_float32_cog(
                 arr=arr,
@@ -243,6 +261,8 @@ def build_gcov_for_site(
                     "frame": rec.frame,
                     "direction": rec.direction,
                     "polarization_flag": prod["polarization_flag"],
+                    "freq_a_mhz": win.freq_a_mhz,
+                    "freq_b_mhz": win.freq_b_mhz,
                 },
             )
             append_to_zarr_stack(
@@ -279,7 +299,7 @@ def build_gcov_for_site(
                     tiles_dir=site_out_dir / tiles_rel,
                     vmin=float(c_meta.get("vmin", -30.0)),
                     vmax=float(c_meta.get("vmax", -8.0)),
-                    cmap_name=str(c_meta.get("cmap", "gray")),
+                    cmap_name=str(c_meta.get("cmap", "YlGn")),
                     convert_linear_to_db_after=True,
                 )
             else:
@@ -289,15 +309,37 @@ def build_gcov_for_site(
                     y=win.y,
                     src_epsg=win.epsg,
                     tiles_dir=site_out_dir / tiles_rel,
-                    vmin=float(c_meta.get("vmin", 0.0)),
-                    vmax=float(c_meta.get("vmax", 1.0)),
-                    cmap_name=str(c_meta.get("cmap", "YlGn")),
+                    vmin=float(c_meta.get("vmin", -4.0 if layer_name == "freq_diff_db" else 0.0)),
+                    vmax=float(c_meta.get("vmax", 4.0 if layer_name == "freq_diff_db" else 1.0)),
+                    cmap_name=str(c_meta.get("cmap", "coolwarm" if layer_name == "freq_diff_db" else "YlGn")),
                     convert_linear_to_db_after=False,
                 )
 
             layer_dates[layer_name].append(rec.date_str)
             layer_cog_paths[layer_name].append(str(cog_rel))
             layer_tile_templates[layer_name].append(f"{tiles_rel}/{{z}}/{{x}}/{{y}}.png")
+
+        # Export 3-band Polarimetric RGB Composite COG + XYZ PNG tiles
+        rgb_cog_rel = Path("cog") / "rgb_composite" / f"{rec.date_str}.tif"
+        write_rgb_cog(
+            rgb_arr=prod["rgb"],
+            x=win.x,
+            y=win.y,
+            epsg=win.epsg,
+            out_path=site_out_dir / rgb_cog_rel,
+            metadata={"date": rec.date_str, "polarization_flag": prod["polarization_flag"]},
+        )
+        rgb_tiles_rel = Path("tiles") / "rgb_composite" / rec.date_str
+        export_rgb_xyz_png_tiles(
+            rgb_arr=prod["rgb"],
+            x=win.x,
+            y=win.y,
+            src_epsg=win.epsg,
+            tiles_dir=site_out_dir / rgb_tiles_rel,
+        )
+        layer_dates["rgb_composite"].append(rec.date_str)
+        layer_cog_paths["rgb_composite"].append(str(rgb_cog_rel))
+        layer_tile_templates["rgb_composite"].append(f"{rgb_tiles_rel}/{{z}}/{{x}}/{{y}}.png")
 
         sample_pts = site_cfg.get("sample_points", [])
         if sample_pts:
@@ -314,13 +356,14 @@ def build_gcov_for_site(
         if first_window is None:
             first_window = win
         last_window = win
+        last_prod = prod
 
     catalog_entries: Dict[str, Dict[str, Any]] = {}
     for layer_name, dates in layer_dates.items():
         if not dates:
             continue
         c_meta = color_cfg.get(layer_name, {})
-        catalog_entries[layer_name] = {
+        entry: Dict[str, Any] = {
             "id": layer_name,
             "title": c_meta.get("title", layer_name),
             "units": c_meta.get("units", ""),
@@ -331,12 +374,14 @@ def build_gcov_for_site(
             "colormap": c_meta.get("cmap", "viridis"),
             "cog_files": layer_cog_paths[layer_name],
             "tile_templates": layer_tile_templates[layer_name],
-            "zarr_stack": f"stack/{layer_name}.zarr",
             "track": track,
             "frame": frame,
             "direction": direction,
             "polarization_flags": pol_flags_by_date,
         }
+        if layer_name != "rgb_composite":
+            entry["zarr_stack"] = f"stack/{layer_name}.zarr"
+        catalog_entries[layer_name] = entry
 
     if (
         first_window is not None
@@ -399,6 +444,16 @@ def build_gcov_for_site(
         site_title=site_cfg.get("title", site_name),
         layer_entries=catalog_entries,
     )
+
+    # Generate reproducible Polarization + Dual-Frequency Explorer & Human-Friendly Guide PNGs
+    if last_window is not None and last_prod is not None:
+        plot_pol_and_freq_explorer(
+            win=last_window,
+            prod=last_prod,
+            site_out_dir=site_out_dir,
+            site_title=site_cfg.get("title", site_name),
+        )
+    plot_human_friendly_guide(site_out_dir, show_inline=False)
 
 
 def build_gunw_for_site(
@@ -562,6 +617,7 @@ def build_gunw_for_site(
     }
 
     update_catalog_json(site_out_dir / "catalog.json", site_name, site_cfg.get("title", site_name), catalog_entries)
+    plot_human_friendly_guide(site_out_dir, show_inline=False)
 
 
 def build_goff_for_site(
@@ -665,6 +721,7 @@ def build_goff_for_site(
         }
     }
     update_catalog_json(site_out_dir / "catalog.json", site_name, site_cfg.get("title", site_name), catalog_entries)
+    plot_human_friendly_guide(site_out_dir, show_inline=False)
 
 
 def build_sme2_for_site(
@@ -779,15 +836,16 @@ def build_sme2_for_site(
             }
         },
     )
+    plot_human_friendly_guide(site_out_dir, show_inline=False)
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Configure CLI argument parser."""
     ap = argparse.ArgumentParser(
         prog="run_site.py",
-        description="NASA-ISRO NISAR data-pull and preprocessing CLI.",
+        description="NASA-ISRO NISAR data-pull, preprocessing, and human-friendly plotting CLI.",
     )
-    ap.add_argument("cmd", choices=["search", "inspect", "build"])
+    ap.add_argument("cmd", choices=["search", "inspect", "build", "plot"])
     ap.add_argument(
         "--site",
         choices=["california", "nile_delta", "himalaya"],
@@ -829,6 +887,44 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     end = args.end or site_cfg.get(
         "end", datetime.now(timezone.utc).strftime("%Y-%m-%d")
     )
+    site_out_dir = Path(cfg.get("out_dir", "out")) / args.site
+
+    if args.cmd == "plot":
+        if (site_out_dir / "catalog.json").exists():
+            plot_human_friendly_guide(site_out_dir, show_inline=False)
+        else:
+            logger.info(
+                "No existing catalog in %s; streaming latest GCOV granule to generate explorer plot.",
+                site_out_dir,
+            )
+            token = get_edl_token()
+            records = search_nisar(bbox=bbox, processing_level="GCOV", start=start, end=end)
+            _, grp = select_primary_group(records)
+            target = next((r for r in reversed(grp) if "_0005_NADV_" not in r.file_name), grp[-1])
+            win = run_with_h5_retry(
+                url_or_path=target.url,
+                token=token,
+                download=args.download,
+                reader_fn=lambda h5: load_gcov_window(
+                    h5,
+                    bbox_lonlat=bbox,
+                    looks=int(site_cfg.get("looks", 4)),
+                    track=target.track,
+                    frame=target.frame,
+                    direction=target.direction,
+                    time=target.time,
+                    date_str=target.date_str,
+                    file_name=target.file_name,
+                ),
+            )
+            prod = compute_single_date_products(win)
+            plot_pol_and_freq_explorer(
+                win=win,
+                prod=prod,
+                site_out_dir=site_out_dir,
+                site_title=site_cfg.get("title", args.site),
+            )
+        return 0
 
     for product in args.products:
         records = search_nisar(
@@ -889,10 +985,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     )
                     for k, v in win.pols.items():
                         logger.info(
-                            "GCOV AOI window %s: shape=%s, median_linear=%.5f",
+                            "GCOV AOI window %s: shape=%s, median_linear=%.5f, has_dual_freq=%s",
                             k,
                             v.shape,
                             float(np.nanmedian(v)),
+                            win.has_dual_freq,
                         )
 
             run_with_h5_retry(

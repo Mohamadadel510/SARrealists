@@ -1,6 +1,7 @@
 """
-ASF DAAC search, deterministic de-duplication, Earthdata token handling,
-retry-wrapped fsspec/h5py streaming, resumable download fallback, and HDF5 inspect.
+ASF DAAC search, deterministic de-duplication, AOI footprint overlap scoring,
+Earthdata token handling, retry-wrapped fsspec/h5py streaming, resumable download
+fallback, and HDF5 inspect.
 """
 from __future__ import annotations
 
@@ -24,15 +25,12 @@ from nisar_pipeline.layers import IDENTIFICATION_GROUP
 
 logger = logging.getLogger(__name__)
 
-# Matches both standard live NISAR tails (..._P05023_N_F_J_001.h5)
-# and short tails (..._R04000_002.h5)
 _VERSION_RE = re.compile(
     r"_(?P<stage>[PRX])(?P<crid>\d{5})(?:_[A-Z0-9])+?_(?P<counter>\d{2,3})(?:\.h5)?$"
     r"|_(?P<stage_short>[PRX])(?P<crid_short>\d{5})_(?P<counter_short>\d{2,3})(?:\.h5)?$",
     re.IGNORECASE,
 )
 
-# Operational ('R') > Provisional ('P') > Experimental/CalVal ('X')
 _STAGE_RANK: Dict[str, int] = {"X": 1, "P": 2, "R": 3}
 
 
@@ -54,6 +52,7 @@ class GranuleRecord:
     version_tag: str
     version_sort_key: Tuple[int, int, int, int, str]
     secondary_time: Optional[str] = None
+    aoi_overlap_pct: float = 100.0
 
     @property
     def group_key(self) -> Tuple[int, int, str]:
@@ -71,16 +70,62 @@ def aoi_wkt(bbox: Sequence[float]) -> str:
     return f"POLYGON(({w} {s},{e} {s},{e} {n},{w} {n},{w} {s}))"
 
 
+def _extract_geometry_bbox(geom: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float, float, float]]:
+    """Extract (west, south, east, north) from a GeoJSON Polygon/MultiPolygon dictionary."""
+    if not geom or not isinstance(geom, dict):
+        return None
+    coords = geom.get("coordinates")
+    if not coords:
+        return None
+    lons: List[float] = []
+    lats: List[float] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, (list, tuple)):
+            if len(node) >= 2 and isinstance(node[0], (int, float)) and isinstance(node[1], (int, float)):
+                lons.append(float(node[0]))
+                lats.append(float(node[1]))
+            else:
+                for child in node:
+                    _walk(child)
+
+    _walk(coords)
+    if not lons or not lats:
+        return None
+    return (min(lons), min(lats), max(lons), max(lats))
+
+
+def compute_bbox_overlap_pct(
+    aoi_bbox: Sequence[float],
+    footprint_bbox: Optional[Sequence[float]],
+) -> float:
+    """
+    Compute percentage (0..100) of `aoi_bbox` area covered by `footprint_bbox`.
+    """
+    if not footprint_bbox or len(footprint_bbox) != 4:
+        return 100.0
+    aw, as_, ae, an = [float(v) for v in aoi_bbox]
+    fw, fs, fe, fn = [float(v) for v in footprint_bbox]
+
+    aoi_area = max(1e-9, (ae - aw) * (an - as_))
+    iw = max(aw, fw)
+    is_ = max(as_, fs)
+    ie = min(ae, fe)
+    in_ = min(an, fn)
+
+    if ie <= iw or in_ <= is_:
+        return 0.0
+    inter_area = (ie - iw) * (in_ - is_)
+    return round(min(100.0, 100.0 * inter_area / aoi_area), 1)
+
+
 def get_edl_token(
     env_var: str = "EDL_TOKEN",
     token_file: Path | str = "/content/.edl_token",
 ) -> str:
     """
-    Read Earthdata Login bearer token from:
-      1. Environment variable `EDL_TOKEN`
-      2. Local session cache `/content/.edl_token` (survives Colab kernel restarts)
-      3. Interactive `getpass` prompt if running in an interactive terminal
-    Never prints or logs the token value.
+    Read Earthdata Login bearer token from environment variable, `/content/.edl_token`
+    cache, or interactive prompt. Never prints or logs the token value.
     """
     raw = os.environ.get(env_var, "").strip()
 
@@ -113,11 +158,7 @@ def parse_nisar_version(
 ) -> Tuple[str, Tuple[int, int, int, int, str], bool]:
     """
     Parse production version from a NISAR HDF5 filename.
-
-    Returns:
-        (version_tag, sort_key, parsed_ok)
-        where sort_key = (stage_rank, crid_int, counter_int, is_nominal_pr, file_name).
-        Operational ('R') > Provisional ('P') > CalVal ('X'), and Nominal ('_PR_') > Urgent ('_UR_').
+    Operational ('R') > Provisional ('P') > CalVal ('X'), and Nominal ('_PR_') > Urgent ('_UR_').
     """
     stem = Path(file_name).name
     is_nominal_pr = 1 if "_PR_" in stem else 0
@@ -152,6 +193,7 @@ def _match_url_for_result(props: Dict[str, Any], urls: Sequence[str]) -> Optiona
 
 def normalize_and_dedupe_granules(
     raw_items: Iterable[Dict[str, Any]],
+    aoi_bbox: Optional[Sequence[float]] = None,
 ) -> List[GranuleRecord]:
     """
     Convert raw search dictionaries into GranuleRecords and deterministically
@@ -169,6 +211,10 @@ def normalize_and_dedupe_granules(
         secondary_time = item.get("secondary_time")
         sec_str = str(secondary_time)[:19] if secondary_time else None
 
+        overlap_pct = float(item.get("aoi_overlap_pct", 100.0))
+        if aoi_bbox is not None and "footprint_bbox" in item:
+            overlap_pct = compute_bbox_overlap_pct(aoi_bbox, item.get("footprint_bbox"))
+
         v_tag, v_key, parsed_ok = parse_nisar_version(file_name)
         if not parsed_ok:
             logger.debug("Could not parse CRID version from filename: %s", file_name)
@@ -185,11 +231,10 @@ def normalize_and_dedupe_granules(
                 version_tag=v_tag,
                 version_sort_key=v_key,
                 secondary_time=sec_str,
+                aoi_overlap_pct=overlap_pct,
             )
         )
 
-    # Group by (track, frame, direction, start_time) so reprocessings with slight
-    # stopTime differences are still de-duplicated properly
     by_slot: Dict[Tuple[int, int, str, str], List[GranuleRecord]] = defaultdict(list)
     for rec in records:
         slot = (rec.track, rec.frame, rec.direction, rec.time)
@@ -201,7 +246,6 @@ def normalize_and_dedupe_granules(
             deduped.append(group[0])
             continue
 
-        # Sort ascending by version_sort_key; last item is newest version
         group_sorted = sorted(group, key=lambda r: r.version_sort_key)
         chosen = group_sorted[-1]
         dropped = [r.file_name for r in group_sorted[:-1]]
@@ -248,7 +292,7 @@ def search_nisar(
     search_fn: Optional[Callable[..., Any]] = None,
 ) -> List[GranuleRecord]:
     """
-    Search ASF DAAC for NISAR granules, match .h5 URLs, and de-duplicate.
+    Search ASF DAAC for NISAR granules, compute AOI footprint overlap %, and de-duplicate.
     """
     if search_fn is None:
         import asf_search as asf
@@ -293,6 +337,8 @@ def search_nisar(
         if url is None:
             continue
         file_name = str(p.get("fileName") or Path(urlparse(url).path).name)
+        geom = getattr(r, "geometry", None)
+        fp_bbox = _extract_geometry_bbox(geom)
         raw_items.append(
             {
                 "time": str(p.get("startTime", ""))[:19],
@@ -302,10 +348,11 @@ def search_nisar(
                 "direction": str(p.get("flightDirection") or "U"),
                 "file_name": file_name,
                 "url": url,
+                "footprint_bbox": fp_bbox,
             }
         )
 
-    records = normalize_and_dedupe_granules(raw_items)
+    records = normalize_and_dedupe_granules(raw_items, aoi_bbox=bbox)
 
     if track is not None:
         records = [r for r in records if r.track == int(track)]
@@ -336,27 +383,52 @@ def group_by_track_frame(
 def select_primary_group(
     records: Sequence[GranuleRecord],
 ) -> Tuple[Tuple[int, int, str], List[GranuleRecord]]:
-    """Select the (track, frame, direction) group with the most acquisitions."""
+    """
+    Select the best (track, frame, direction) group by prioritizing:
+      1. Groups with at least 2 dates (so pairwise change / stacks can be built)
+      2. Highest median AOI footprint overlap % (binned to nearest 5% so a frame covering
+         85% of the Nile Delta beats a coastal frame covering only 20% of the top edge)
+      3. Number of acquisitions in the group
+      4. Most recent acquisition timestamp
+    """
     if not records:
         raise ValueError("Cannot select a group from an empty granule list.")
     groups = group_by_track_frame(records)
-    best_key = max(groups.keys(), key=lambda k: (len(groups[k]), groups[k][-1].time))
-    return best_key, groups[best_key]
+
+    def _group_score(k: Tuple[int, int, str]) -> Tuple[int, float, int, str]:
+        grp = groups[k]
+        has_pair = 1 if len(grp) >= 2 else 0
+        med_overlap = float(np.median([r.aoi_overlap_pct for r in grp]))
+        overlap_bin = round(med_overlap / 5.0) * 5.0
+        return (has_pair, overlap_bin, len(grp), grp[-1].time)
+
+    best_key = max(groups.keys(), key=_group_score)
+    chosen_grp = groups[best_key]
+    med_ov = float(np.median([r.aoi_overlap_pct for r in chosen_grp]))
+    logger.info(
+        "Selected primary group (track=%d, frame=%d, dir=%s): %d date(s), median AOI overlap=%.1f%%",
+        best_key[0],
+        best_key[1],
+        best_key[2],
+        len(chosen_grp),
+        med_ov,
+    )
+    return best_key, chosen_grp
 
 
 def print_search_table(records: Sequence[GranuleRecord], product: str = "GCOV") -> None:
-    """Print formatted summary table of discovered NISAR granules (including file_name)."""
+    """Print formatted summary table of discovered NISAR granules (including AOI overlap %)."""
     print(f"\n{len(records)} NISAR {product} granules (after de-duplication)\n")
     header = (
         f"{'idx':>3}  {'acquired (UTC)':<19}  {'track':>5}  "
-        f"{'frame':>5}  {'dir':>3}  {'version':<10}  file_name"
+        f"{'frame':>5}  {'dir':>3}  {'overlap':>7}  {'version':<10}  file_name"
     )
     print(header)
     print("-" * len(header))
     for i, r in enumerate(records):
         print(
             f"{i:>3}  {r.time:<19}  {r.track:>5}  "
-            f"{r.frame:>5}  {r.direction:>3}  {r.version_tag:<10}  {r.file_name}"
+            f"{r.frame:>5}  {r.direction:>3}  {r.aoi_overlap_pct:>6.1f}%  {r.version_tag:<10}  {r.file_name}"
         )
     print()
 
@@ -566,7 +638,6 @@ def _decode_attr(val: Any) -> Any:
 def inspect_granule(h5: h5py.File, print_output: bool = True) -> List[Dict[str, Any]]:
     """
     List every dataset path, shape, dtype, and key attributes in a NISAR HDF5 granule.
-    Use this output to verify GUNW, GOFF, and SME2 dataset paths in `layers.py`.
     """
     ident_info: Dict[str, Any] = {}
     ident = h5.get(IDENTIFICATION_GROUP)

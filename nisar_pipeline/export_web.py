@@ -4,10 +4,8 @@ Web visualization asset exporter:
   * Reprojects linear backscatter power BEFORE converting to dB
   * Uses bilinear resampling for continuous layers and nearest-neighbor for class masks
 - Slippy-map 8-bit RGBA colormapped XYZ PNG tiles (`out/<site>/tiles/<layer>/<YYYYMMDD>/{z}/{x}/{y}.png`)
-  using fixed color ranges from `config.yaml`
-- GeoJSON vector exporters in EPSG:4326 (`out/<site>/vectors/<name>.geojson`) for:
-  * Glacier velocity arrows (`speed`, `dir`, `ve_m_yr`, `vn_m_yr`)
-  * Subsidence grid points (`rate_mm_yr`, `disp_mm`)
+  and 3-band Polarimetric RGB composite XYZ tiles (`out/<site>/tiles/rgb_composite/<YYYYMMDD>/{z}/{x}/{y}.png`)
+- GeoJSON vector exporters in EPSG:4326 (`out/<site>/vectors/<name>.geojson`)
 """
 from __future__ import annotations
 
@@ -15,13 +13,12 @@ import json
 import logging
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 import matplotlib
 import matplotlib.image as mpimg
 import numpy as np
 from pyproj import Transformer
-import rasterio
 from rasterio.crs import CRS
 from rasterio.transform import Affine, from_bounds
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -43,11 +40,6 @@ def reproject_array_to_3857(
 ) -> Tuple[np.ndarray, Affine, Tuple[float, float, float, float]]:
     """
     Reproject a 2D array from native UTM (`EPSG:src_epsg`) to Web Mercator (`EPSG:3857`).
-
-    Science rules enforced:
-      - Continuous layers use `Resampling.bilinear`; discrete masks use `Resampling.nearest`.
-      - If `convert_linear_to_db_after=True`, bilinear warping is performed on linear power
-        values first, and `10 * log10` is applied afterward.
     """
     src_data, x_asc, y_desc, src_transform = compute_affine_and_orient(arr, x, y)
     h, w = src_data.shape
@@ -107,7 +99,7 @@ def apply_fixed_colormap_rgba(
     denom = max(1e-6, float(vmax) - float(vmin))
     normed = np.clip((arr[valid] - float(vmin)) / denom, 0.0, 1.0)
     cmap = matplotlib.colormaps[cmap_name]
-    mapped = cmap(normed)  # (N, 4) float in [0, 1]
+    mapped = cmap(normed)
     rgba_valid = np.round(mapped * 255.0).astype(np.uint8)
     rgba_valid[:, 3] = 255
     rgba[valid] = rgba_valid
@@ -141,6 +133,16 @@ def _tile_xy_to_3857_bounds(xtile: int, ytile: int, z: int) -> Tuple[float, floa
     return left, bottom, right, top
 
 
+def _choose_adaptive_zoom_levels(
+    w_lon: float, s_lat: float, e_lon: float, n_lat: float, requested: Sequence[int]
+) -> Sequence[int]:
+    """Scale default zoom levels to regional extent so large AOIs tile quickly."""
+    max_span_deg = max(e_lon - w_lon, n_lat - s_lat)
+    if tuple(requested) == (10, 11, 12) and max_span_deg > 0.6:
+        return (7, 8, 9) if max_span_deg > 1.5 else (8, 9, 10)
+    return requested
+
+
 def export_xyz_png_tiles(
     arr: np.ndarray,
     x: np.ndarray,
@@ -158,11 +160,6 @@ def export_xyz_png_tiles(
     """
     Generate 8-bit colormapped XYZ PNG tiles in `EPSG:3857` at:
       `out/<site>/tiles/<layer>/<YYYYMMDD>/{z}/{x}/{y}.png`
-
-    Enforces:
-      - Bilinear resampling for continuous data, nearest-neighbor for masks
-      - Linear power warped before dB conversion when `convert_linear_to_db_after=True`
-    Returns the count of written non-empty PNG tiles.
     """
     src_data, x_asc, y_desc, src_transform = compute_affine_and_orient(arr, x, y)
     src_crs = CRS.from_epsg(int(src_epsg))
@@ -182,6 +179,7 @@ def export_xyz_png_tiles(
         ]
     )
     w_lon, s_lat, e_lon, n_lat = min(lons), min(lats), max(lons), max(lats)
+    zoom_levels = _choose_adaptive_zoom_levels(w_lon, s_lat, e_lon, n_lat, zoom_levels)
 
     written_count = 0
     for z in zoom_levels:
@@ -217,6 +215,82 @@ def export_xyz_png_tiles(
                 rgba = apply_fixed_colormap_rgba(
                     tile_buf, vmin=vmin, vmax=vmax, cmap_name=cmap_name
                 )
+                png_path = tiles_dir / str(z) / str(tx) / f"{ty}.png"
+                png_path.parent.mkdir(parents=True, exist_ok=True)
+                mpimg.imsave(png_path, rgba)
+                written_count += 1
+
+    return written_count
+
+
+def export_rgb_xyz_png_tiles(
+    rgb_arr: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    src_epsg: int,
+    tiles_dir: Path,
+    zoom_levels: Sequence[int] = (10, 11, 12),
+    tile_size: int = 256,
+) -> int:
+    """
+    Generate 8-bit RGBA XYZ PNG tiles in `EPSG:3857` for the 3-band `(3, H, W)`
+    Polarimetric RGB composite (`0` = transparent nodata).
+    """
+    src_data, x_asc, y_desc, src_transform = compute_affine_and_orient(rgb_arr, x, y)
+    src_crs = CRS.from_epsg(int(src_epsg))
+    dst_crs = CRS.from_epsg(3857)
+
+    tr_to_4326 = Transformer.from_crs(src_epsg, 4326, always_xy=True)
+    lons, lats = zip(
+        *[
+            tr_to_4326.transform(cx, cy)
+            for cx, cy in [
+                (float(x_asc.min()), float(y_desc.min())),
+                (float(x_asc.max()), float(y_desc.min())),
+                (float(x_asc.max()), float(y_desc.max())),
+                (float(x_asc.min()), float(y_desc.max())),
+            ]
+        ]
+    )
+    w_lon, s_lat, e_lon, n_lat = min(lons), min(lats), max(lons), max(lats)
+    zoom_levels = _choose_adaptive_zoom_levels(w_lon, s_lat, e_lon, n_lat, zoom_levels)
+
+    written_count = 0
+    for z in zoom_levels:
+        x_min, y_max = _lonlat_to_tile_xy(w_lon, s_lat, z)
+        x_max, y_min = _lonlat_to_tile_xy(e_lon, n_lat, z)
+
+        for tx in range(x_min, x_max + 1):
+            for ty in range(y_min, y_max + 1):
+                t_left, t_bottom, t_right, t_top = _tile_xy_to_3857_bounds(tx, ty, z)
+                tile_transform = from_bounds(
+                    t_left, t_bottom, t_right, t_top, tile_size, tile_size
+                )
+                tile_rgb = np.zeros((3, tile_size, tile_size), dtype=np.uint8)
+
+                for b_idx in range(3):
+                    reproject(
+                        source=src_data[b_idx],
+                        destination=tile_rgb[b_idx],
+                        src_transform=src_transform,
+                        src_crs=src_crs,
+                        dst_transform=tile_transform,
+                        dst_crs=dst_crs,
+                        src_nodata=0,
+                        dst_nodata=0,
+                        resampling=Resampling.bilinear,
+                    )
+
+                valid = (tile_rgb[0] > 0) | (tile_rgb[1] > 0) | (tile_rgb[2] > 0)
+                if not np.any(valid):
+                    continue
+
+                rgba = np.zeros((tile_size, tile_size, 4), dtype=np.uint8)
+                rgba[:, :, 0] = tile_rgb[0]
+                rgba[:, :, 1] = tile_rgb[1]
+                rgba[:, :, 2] = tile_rgb[2]
+                rgba[:, :, 3] = np.where(valid, 255, 0).astype(np.uint8)
+
                 png_path = tiles_dir / str(z) / str(tx) / f"{ty}.png"
                 png_path.parent.mkdir(parents=True, exist_ok=True)
                 mpimg.imsave(png_path, rgba)

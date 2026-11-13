@@ -1,6 +1,7 @@
 """
-AOI-to-UTM window transformation, windowed HDF5 reads, layover/shadow masking,
-linear-power boxcar multilooking, coordinate alignment, and reference/chaining math.
+AOI-to-UTM window transformation, windowed HDF5 reads (including simultaneous
+Frequency A and Frequency B sub-bands), layover/shadow masking, linear-power boxcar
+multilooking, coordinate alignment, and reference/chaining math.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from pyproj import Transformer
 from nisar_pipeline.io_nisar import UnsupportedGranuleError
 from nisar_pipeline.layers import (
     GCOV_GRID_GROUP,
+    GCOV_GRID_GROUP_B,
     GCOV_INCIDENCE_ANGLE,
     GCOV_MASK,
     GCOV_POLARIZATIONS,
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 class GCOVWindow:
     """Container for a multilooked GCOV AOI window in native UTM coordinates."""
 
-    pols: Dict[str, np.ndarray]  # Linear power (float32, NaN nodata)
+    pols: Dict[str, np.ndarray]  # Frequency A linear power (float32, NaN nodata)
     x: np.ndarray  # 1D UTM Easting centers (float64)
     y: np.ndarray  # 1D UTM Northing centers (float64)
     epsg: int
@@ -48,6 +50,14 @@ class GCOVWindow:
     available_pols: List[str] = field(default_factory=list)
     missing_pols: List[str] = field(default_factory=list)
     has_dual_pol: bool = False
+    # Dual-frequency (Frequency B aligned in linear power onto Frequency A's grid)
+    freq_b_pols: Dict[str, np.ndarray] = field(default_factory=dict)
+    has_dual_freq: bool = False
+    freq_a_mhz: Optional[float] = None
+    freq_b_mhz: Optional[float] = None
+    pixel_spacing_a_m: Optional[float] = None
+    pixel_spacing_b_m: Optional[float] = None
+    active_bands: List[str] = field(default_factory=lambda: ["LSAR"])
 
 
 def read_epsg_from_projection(proj_ds: h5py.Dataset) -> int:
@@ -133,9 +143,7 @@ def block_mean(arr: np.ndarray, looks: int) -> np.ndarray:
 
 
 def block_mask_nearest(mask_arr: np.ndarray, looks: int) -> np.ndarray:
-    """
-    Downsample a discrete uint8 mask using top-left / nearest-neighbor sampling.
-    """
+    """Downsample a discrete uint8 mask using top-left / nearest-neighbor sampling."""
     if looks <= 1:
         return mask_arr.astype(np.uint8, copy=False)
     h = (mask_arr.shape[0] // looks) * looks
@@ -167,6 +175,39 @@ def is_valid_mask_array(
     return valid
 
 
+def align_grid_to_target_coords(
+    src_arr: np.ndarray,
+    src_x: np.ndarray,
+    src_y: np.ndarray,
+    target_x: np.ndarray,
+    target_y: np.ndarray,
+) -> np.ndarray:
+    """
+    Align a 2D linear-power array `(src_y, src_x)` onto `(target_y, target_x)`
+    using separable linear interpolation where valid and nearest-neighbor fallback
+    at NaN boundaries. Preserves float32 and NaN nodata.
+    """
+    if len(src_x) == 0 or len(src_y) == 0:
+        return np.full((len(target_y), len(target_x)), np.nan, dtype=np.float32)
+
+    # Fast nearest-index mapping along X and Y (handles coarser Frequency B -> Frequency A cleanly
+    # without smearing NaN borders across valid pixels)
+    ix = np.argmin(np.abs(src_x[np.newaxis, :] - target_x[:, np.newaxis]), axis=1)
+    iy = np.argmin(np.abs(src_y[np.newaxis, :] - target_y[:, np.newaxis]), axis=1)
+    return src_arr[np.ix_(iy, ix)].astype(np.float32, copy=False)
+
+
+def _read_center_freq_mhz(group: h5py.Group) -> Optional[float]:
+    """Read `centerFrequency` in Hz from a GCOV frequency group and return MHz."""
+    if "centerFrequency" not in group:
+        return None
+    try:
+        hz = float(np.array(group["centerFrequency"][()]).item())
+        return round(hz / 1e6, 2) if np.isfinite(hz) and hz > 0 else None
+    except Exception:
+        return None
+
+
 def _read_interpolated_incidence_angle(
     h5: h5py.File,
     target_x: np.ndarray,
@@ -175,7 +216,6 @@ def _read_interpolated_incidence_angle(
     """
     Read `/science/LSAR/GCOV/metadata/radarGrid/incidenceAngle` and bilinearly
     interpolate the near-surface height slice onto `(target_y, target_x)`.
-    Returns None if the dataset is absent.
     """
     if GCOV_INCIDENCE_ANGLE not in h5:
         return None
@@ -225,34 +265,41 @@ def load_gcov_window(
     time: Optional[str] = None,
     date_str: Optional[str] = None,
     file_name: Optional[str] = None,
+    load_freq_b: bool = True,
 ) -> GCOVWindow:
     """
     Stream only the AOI window from a NISAR GCOV HDF5 file, mask invalid/nonpositive
     and layover/shadow pixels in linear power, and multilook.
 
-    Falls back to `/science/LSAR/GCOV/grids/frequencyB` if `frequencyA` is absent, or
-    raises `UnsupportedGranuleError` immediately without retrying.
+    Also streams `/science/LSAR/GCOV/grids/frequencyB` when present (`load_freq_b=True`),
+    multilooks in linear power, and aligns it onto `frequencyA`'s UTM grid so dual-frequency
+    split-spectrum differences (`freq_diff_db`) can be computed.
     """
+    active_bands = [b for b in ("LSAR", "SSAR") if f"/science/{b}" in h5] or ["LSAR"]
+
     grid_path = GCOV_GRID_GROUP
+    used_fallback_b = False
     if grid_path not in h5:
-        alt_grid_path = "/science/LSAR/GCOV/grids/frequencyB"
-        if alt_grid_path in h5:
+        if GCOV_GRID_GROUP_B in h5:
             logger.warning(
                 "Granule %s is missing '%s'; falling back to '%s'.",
                 file_name,
                 grid_path,
-                alt_grid_path,
+                GCOV_GRID_GROUP_B,
             )
-            grid_path = alt_grid_path
+            grid_path = GCOV_GRID_GROUP_B
+            used_fallback_b = True
         else:
             raise UnsupportedGranuleError(
-                f"Granule {file_name} has neither '{GCOV_GRID_GROUP}' nor '{alt_grid_path}'."
+                f"Granule {file_name} has neither '{GCOV_GRID_GROUP}' nor '{GCOV_GRID_GROUP_B}'."
             )
 
     g = h5[grid_path]
     x_full = g[GCOV_X.split("/")[-1]][:]
     y_full = g[GCOV_Y.split("/")[-1]][:]
     epsg = read_epsg_from_projection(g[GCOV_PROJECTION.split("/")[-1]])
+    freq_a_mhz = _read_center_freq_mhz(g)
+    dx_a = float(abs(x_full[1] - x_full[0])) if len(x_full) > 1 else 20.0
 
     slice_y, slice_x, _ = bbox_to_utm_slices(x_full, y_full, bbox_lonlat, epsg)
 
@@ -260,7 +307,7 @@ def load_gcov_window(
     mask_multilooked: Optional[np.ndarray] = None
     mask_name = GCOV_MASK.split("/")[-1]
     if mask_name in g:
-        raw_mask = np.asarray(g[mask_name][slice_y, slice_x], dtype=np.uint8)
+        raw_mask = (np.asarray(g[mask_name][slice_y, slice_x]) & 0xFF).astype(np.uint8)
         valid_pixel_mask = is_valid_mask_array(raw_mask, invalid_mask_values)
         mask_multilooked = block_mask_nearest(raw_mask, looks)
 
@@ -294,6 +341,49 @@ def load_gcov_window(
     y_win = coord_mean(y_full[slice_y], looks)
     inc_win = _read_interpolated_incidence_angle(h5, x_win, y_win)
 
+    # Stream simultaneous Frequency B (if present and not already used as fallback)
+    freq_b_pols: Dict[str, np.ndarray] = {}
+    freq_b_mhz: Optional[float] = None
+    dx_b: Optional[float] = None
+
+    if load_freq_b and not used_fallback_b and GCOV_GRID_GROUP_B in h5:
+        try:
+            gb = h5[GCOV_GRID_GROUP_B]
+            xb_full = gb["xCoordinates"][:]
+            yb_full = gb["yCoordinates"][:]
+            freq_b_mhz = _read_center_freq_mhz(gb)
+            dx_b = float(abs(xb_full[1] - xb_full[0])) if len(xb_full) > 1 else 40.0
+
+            sy_b, sx_b, _ = bbox_to_utm_slices(xb_full, yb_full, bbox_lonlat, epsg)
+            looks_b = max(1, int(round(looks * (dx_a / max(5.0, dx_b)))))
+            # Ensure looks_b does not exceed the sliced window dimensions
+            win_h_b = sy_b.stop - sy_b.start
+            win_w_b = sx_b.stop - sx_b.start
+            looks_b = max(1, min(looks_b, win_h_b, win_w_b))
+
+            valid_mask_b: Optional[np.ndarray] = None
+            if mask_name in gb:
+                raw_mb = (np.asarray(gb[mask_name][sy_b, sx_b]) & 0xFF).astype(np.uint8)
+                valid_mask_b = is_valid_mask_array(raw_mb, invalid_mask_values)
+
+            xb_win = coord_mean(xb_full[sx_b], looks_b)
+            yb_win = coord_mean(yb_full[sy_b], looks_b)
+
+            for pol_name in GCOV_POLARIZATIONS:
+                if pol_name in gb:
+                    arr_b = np.asarray(gb[pol_name][sy_b, sx_b], dtype=np.float32)
+                    bad_b = ~np.isfinite(arr_b) | (arr_b <= 0.0)
+                    if valid_mask_b is not None:
+                        bad_b |= ~valid_mask_b
+                    arr_b[bad_b] = np.nan
+                    ml_b = block_mean(arr_b, looks_b)
+                    if np.any(np.isfinite(ml_b)):
+                        freq_b_pols[pol_name] = align_grid_to_target_coords(
+                            ml_b, xb_win, yb_win, x_win, y_win
+                        )
+        except Exception as exc:
+            logger.debug("Could not load Frequency B window for %s: %s", file_name, exc)
+
     has_co = ("HHHH" in pols) or ("VVVV" in pols)
     has_cross = ("HVHV" in pols) or ("VHVH" in pols)
 
@@ -313,6 +403,13 @@ def load_gcov_window(
         available_pols=available_pols,
         missing_pols=missing_pols,
         has_dual_pol=bool(has_co and has_cross),
+        freq_b_pols=freq_b_pols,
+        has_dual_freq=bool(len(freq_b_pols) > 0),
+        freq_a_mhz=freq_a_mhz,
+        freq_b_mhz=freq_b_mhz,
+        pixel_spacing_a_m=round(dx_a, 1),
+        pixel_spacing_b_m=round(dx_b, 1) if dx_b is not None else None,
+        active_bands=active_bands,
     )
 
 

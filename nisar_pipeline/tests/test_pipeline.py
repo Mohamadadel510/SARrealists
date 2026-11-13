@@ -9,6 +9,11 @@ Verifies:
 4. Chained cumulative displacement sum across 12-day pairs
 5. Stable reference box subtraction in UTM coordinates
 6. AOI-to-UTM window slicing, layover/shadow mask filtering, de-duplication, and retry wrapper
+7. Deterministic CRID version de-duplication and UNVERIFIED layer guard
+8. GUNW phase-to-LOS conversion (-phase*lambda/(4*pi)), flat-terrain vertical guard, and robust linear rate fit
+9. GOFF 2D horizontal glacier velocity vectors, GeoJSON export, and linear-before-dB EPSG:3857 reprojection
+10. Simultaneous Frequency A + Frequency B extraction, Dual-Frequency difference (`freq_diff_db`),
+    Polarimetric RGB composite export, and human-friendly plot generation
 """
 from __future__ import annotations
 
@@ -26,17 +31,35 @@ import numpy as np
 import pytest
 from pyproj import Transformer
 
+from nisar_pipeline.export_web import (
+    export_rgb_xyz_png_tiles,
+    export_velocity_vectors_geojson,
+    reproject_array_to_3857,
+)
 from nisar_pipeline.gcov import (
     compute_pairwise_change,
     compute_rvi,
     compute_single_date_products,
     linear_to_db,
+    write_rgb_cog,
+)
+from nisar_pipeline.goff import compute_velocity_vectors
+from nisar_pipeline.gunw import (
+    fit_robust_linear_rate_mm_yr,
+    los_to_vertical_displacement_mm,
+    phase_to_los_displacement_mm,
 )
 from nisar_pipeline.io_nisar import (
     normalize_and_dedupe_granules,
     run_with_h5_retry,
 )
-from nisar_pipeline.layers import GCOV_GRID_GROUP, GUNW_UNWRAPPED_PHASE, require_verified_layer
+from nisar_pipeline.layers import (
+    GCOV_GRID_GROUP,
+    GCOV_GRID_GROUP_B,
+    GUNW_UNWRAPPED_PHASE,
+    require_verified_layer,
+)
+from nisar_pipeline.plots import plot_pol_and_freq_explorer
 from nisar_pipeline.window import (
     GCOVWindow,
     block_mean,
@@ -55,6 +78,7 @@ def _create_synthetic_gcov_h5(
     ny: int = 60,
     nx: int = 60,
     include_hv: bool = True,
+    include_freq_b: bool = False,
 ) -> h5py.File:
     """Create an in-memory HDF5 file matching the verified NISAR L2 GCOV schema."""
     bio = io.BytesIO()
@@ -65,12 +89,12 @@ def _create_synthetic_gcov_h5(
     y = ymax - np.arange(ny, dtype=np.float64) * dy
     g.create_dataset("xCoordinates", data=x)
     g.create_dataset("yCoordinates", data=y)
+    g.create_dataset("centerFrequency", data=np.float64(1240.0e6))
 
     proj = g.create_dataset("projection", data=np.int32(epsg))
     proj.attrs["epsg_code"] = np.int32(epsg)
 
     hh = np.full((ny, nx), 0.25, dtype=np.float32)
-    # Inject nonpositive values at (0, 0) and (0, 1) to verify masking
     hh[0, 0] = -1.0
     hh[0, 1] = 0.0
     g.create_dataset("HHHH", data=hh)
@@ -79,24 +103,34 @@ def _create_synthetic_gcov_h5(
         hv = np.full((ny, nx), 0.05, dtype=np.float32)
         g.create_dataset("HVHV", data=hv)
 
-    # Mask: 1 = valid, 0 = outside swath, 255 = layover/shadow
     mask = np.ones((ny, nx), dtype=np.uint8)
     mask[2:4, 2:4] = 255
     mask[4:6, 4:6] = 0
     g.create_dataset("mask", data=mask)
+
+    if include_freq_b:
+        gb = h5.create_group(GCOV_GRID_GROUP_B)
+        nx_b, ny_b = nx // 2, ny // 2
+        xb = xmin + np.arange(nx_b, dtype=np.float64) * (dx * 2.0)
+        yb = ymax - np.arange(ny_b, dtype=np.float64) * (dy * 2.0)
+        gb.create_dataset("xCoordinates", data=xb)
+        gb.create_dataset("yCoordinates", data=yb)
+        gb.create_dataset("centerFrequency", data=np.float64(1290.0e6))
+        proj_b = gb.create_dataset("projection", data=np.int32(epsg))
+        proj_b.attrs["epsg_code"] = np.int32(epsg)
+        # Frequency B power = 0.125 (half of Frequency A 0.25 -> +3.0103 dB difference)
+        gb.create_dataset("HHHH", data=np.full((ny_b, nx_b), 0.125, dtype=np.float32))
+        gb.create_dataset("mask", data=np.ones((ny_b, nx_b), dtype=np.uint8))
 
     return h5
 
 
 def test_multilook_linear_before_db_order() -> None:
     """Verify multilooking in linear power before 10*log10 differs from averaging in dB."""
-    raw_linear = np.array(
-        [[0.01, 0.09], [0.25, 0.81]], dtype=np.float32
-    )
+    raw_linear = np.array([[0.01, 0.09], [0.25, 0.81]], dtype=np.float32)
     ml_linear = block_mean(raw_linear, looks=2)
     db_from_ml_linear = linear_to_db(ml_linear)
 
-    # Incorrect method: convert to dB first, then average
     wrong_avg_db = block_mean(linear_to_db(raw_linear), looks=2)
 
     expected_mean_lin = np.mean(raw_linear)
@@ -104,7 +138,6 @@ def test_multilook_linear_before_db_order() -> None:
 
     assert db_from_ml_linear.dtype == np.float32
     assert np.isclose(db_from_ml_linear[0, 0], expected_db, atol=1e-5)
-    # By Jensen's inequality on concave log10, mean(dB) < dB(mean(linear))
     assert wrong_avg_db[0, 0] < db_from_ml_linear[0, 0]
 
 
@@ -115,17 +148,13 @@ def test_rvi_bounds_and_hh_only_fallback() -> None:
 
     rvi = compute_rvi(hh, hv)
     assert rvi.dtype == np.float32
-    # At (0, 1): 4 * 0.10 / (0.40 + 0.10) = 0.80
     assert np.isclose(rvi[0, 1], 0.80, atol=1e-5)
-    # At (1, 0): 4 * (1/15) / (3/15 + 1/15) = 1.0 (clipped to 1.0)
     assert np.isclose(rvi[1, 0], 1.0, atol=1e-4)
-    # At (1, 1): HH == 0 -> masked to NaN
     assert np.isnan(rvi[1, 1])
 
     valid_vals = rvi[np.isfinite(rvi)]
     assert np.all((valid_vals >= 0.0) & (valid_vals <= 1.0))
 
-    # HH-only fallback when HV is None
     rvi_missing = compute_rvi(hh, None)
     assert np.all(np.isnan(rvi_missing))
 
@@ -151,7 +180,6 @@ def test_pairwise_change_sign_and_track_guard() -> None:
         direction="D",
         date_str="20260101",
     )
-    # Post-fire: HV drops by half (-3.01 dB), HH stays constant
     post_win = GCOVWindow(
         pols={
             "HHHH": np.full((2, 2), 0.20, dtype=np.float32),
@@ -175,7 +203,6 @@ def test_pairwise_change_sign_and_track_guard() -> None:
     assert np.all(rvi_diff < 0.0)
     assert change["cross_pol_gap"] is False
 
-    # Cross-track comparison must fail
     wrong_track_win = GCOVWindow(
         pols=post_win.pols,
         x=x,
@@ -200,11 +227,8 @@ def test_chained_cumulative_sum() -> None:
     assert cum.shape == (4, 2, 2)
     assert cum.dtype == np.float32
 
-    # Pixel (0, 0): 0 -> 2.0 -> 3.0 -> 2.5
     assert np.allclose(cum[:, 0, 0], [0.0, 2.0, 3.0, 2.5])
-    # Pixel (0, 1): 0 -> -3.0 -> -5.0 -> -6.0
     assert np.allclose(cum[:, 0, 1], [0.0, -3.0, -5.0, -6.0])
-    # Pixel (1, 0): all NaN
     assert np.all(np.isnan(cum[:, 1, 0]))
 
 
@@ -214,14 +238,13 @@ def test_reference_subtraction() -> None:
     x = 300000.0 + np.arange(10, dtype=np.float64) * 100.0
     y = 3450000.0 - np.arange(10, dtype=np.float64) * 100.0
 
-    # Convert pixel block [2..5, 2..5] back to lon/lat to define reference_box
     tr = Transformer.from_crs(epsg, 4326, always_xy=True)
     lon_min, lat_min = tr.transform(x[2], y[5])
     lon_max, lat_max = tr.transform(x[5], y[2])
     ref_bbox = [lon_min, lat_min, lon_max, lat_max]
 
     raw_disp = np.full((10, 10), 12.5, dtype=np.float32)
-    raw_disp[8, 8] = 2.5  # -10.0 relative to reference
+    raw_disp[8, 8] = 2.5
 
     referenced, ref_val = subtract_reference_window(raw_disp, x, y, ref_bbox, epsg)
     assert np.isclose(ref_val, 12.5)
@@ -233,7 +256,6 @@ def test_window_selection_mask_and_retry() -> None:
     """Verify AOI window slicing, layover/shadow mask removal, and retry reopen logic."""
     h5 = _create_synthetic_gcov_h5(epsg=32611, ny=60, nx=60, include_hv=False)
     tr = Transformer.from_crs(32611, 4326, always_xy=True)
-    # Pad by 5 m outside pixel centers (348000.0, 3776000.0) to avoid round-trip boundary drift
     w, s = tr.transform(348000.0 - 5.0, 3776000.0 - 20 * 20.0 - 5.0)
     e, n = tr.transform(348000.0 + 20 * 20.0 + 5.0, 3776000.0 + 5.0)
 
@@ -258,11 +280,8 @@ def test_window_selection_mask_and_retry() -> None:
     assert win.epsg == 32611
     assert win.has_dual_pol is False
     assert "HVHV" in win.missing_pols
-    # Layover/shadow block [2:4, 2:4] (mask=255) -> multilooked pixel [1, 1] must be NaN
     assert np.isnan(win.pols["HHHH"][1, 1])
-    # Valid block [4:6, 4:6] (mask=0) -> multilooked pixel [2, 2] must also be NaN
     assert np.isnan(win.pols["HHHH"][2, 2])
-    # Single-date product falls back cleanly to HHHH-only
     prod = compute_single_date_products(win)
     assert prod["polarization_flag"] == "HHHH_ONLY_GAP"
     assert np.all(np.isnan(prod["layers"]["hv_db"]))
@@ -273,61 +292,53 @@ def test_deduplication_and_unverified_guard() -> None:
     """Verify deterministic CRID deduplication and UNVERIFIED layer guard."""
     raw = [
         {
-            "time": "2026-02-01T13:45:10",
-            "track": 13,
-            "frame": 70,
+            "time": "2026-01-17T02:48:57",
+            "track": 114,
+            "frame": 71,
             "direction": "D",
-            "file_name": "NISAR_L2_PR_GCOV_004_013_D_070_20260201T134510_P03100_001.h5",
-            "url": "https://datapool.asf.alaska.edu/NISAR_P03100_001.h5",
+            "file_name": "NISAR_L2_PR_GCOV_010_114_D_071_4005_DHDH_A_20260117T024857_20260117T024932_X05010_N_F_J_001.h5",
+            "url": "https://datapool.asf.alaska.edu/NISAR_X05010_001.h5",
         },
         {
-            "time": "2026-02-01T13:45:10",
-            "track": 13,
-            "frame": 70,
+            "time": "2026-01-17T02:48:57",
+            "track": 114,
+            "frame": 71,
             "direction": "D",
-            "file_name": "NISAR_L2_PR_GCOV_004_013_D_070_20260201T134510_R04000_002.h5",
-            "url": "https://datapool.asf.alaska.edu/NISAR_R04000_002.h5",
+            "file_name": "NISAR_L2_PR_GCOV_010_114_D_071_4005_DHDH_A_20260117T024857_20260117T024932_P05023_N_F_J_001.h5",
+            "url": "https://datapool.asf.alaska.edu/NISAR_P05023_001.h5",
         },
     ]
     deduped = normalize_and_dedupe_granules(raw)
     assert len(deduped) == 1
-    assert deduped[0].version_tag == "R04000_002"
+    assert deduped[0].version_tag == "P05023_001"
 
     assert require_verified_layer(GUNW_UNWRAPPED_PHASE, product="GUNW") == GUNW_UNWRAPPED_PHASE
     with pytest.raises(RuntimeError, match="is UNVERIFIED"):
         require_verified_layer("/science/LSAR/UNKNOWN/unverifiedDataset", product="TEST")
+
+
 def test_gunw_los_vertical_and_robust_rate() -> None:
     """Verify GUNW LOS formula (-phase*lambda/(4*pi)), flat-site vertical check, and rate fit."""
-    from nisar_pipeline.gunw import (
-        fit_robust_linear_rate_mm_yr,
-        los_to_vertical_displacement_mm,
-        phase_to_los_displacement_mm,
-    )
-
-    # 1 radian of positive unwrapped phase -> -0.24 / (4 * pi) * 1000 = -19.098593 mm
     phase = np.array([[0.0, float(np.pi)], [-float(np.pi), np.nan]], dtype=np.float32)
     los_mm = phase_to_los_displacement_mm(phase, wavelength_m=0.24)
     assert np.isclose(los_mm[0, 0], 0.0)
-    assert np.isclose(los_mm[0, 1], -60.0, atol=1e-4)  # -pi * 0.24 / (4*pi) * 1000 = -60 mm
+    assert np.isclose(los_mm[0, 1], -60.0, atol=1e-4)
     assert np.isclose(los_mm[1, 0], 60.0, atol=1e-4)
     assert np.isnan(los_mm[1, 1])
 
-    # Vertical displacement must fail when flat_terrain=False
     with pytest.raises(ValueError, match="only allowed for flat terrain"):
         los_to_vertical_displacement_mm(los_mm, incidence_angle_deg=60.0, flat_terrain=False)
 
-    # At 60 deg incidence angle (cos=0.5), vertical = LOS / 0.5 = 2 * LOS
     vert_mm = los_to_vertical_displacement_mm(los_mm, incidence_angle_deg=60.0, flat_terrain=True)
     assert np.isclose(vert_mm[0, 1], -120.0, atol=1e-3)
 
-    # Synthetic cumulative displacement stack over 4 dates spaced by ~0.25 yr with -20 mm/yr rate
     dates = ["20260101", "20260402", "20260702", "20261001"]
     t_yrs = np.array([0.0, 91.0 / 365.25, 182.0 / 365.25, 273.0 / 365.25], dtype=np.float32)
     cum = np.zeros((4, 2, 2), dtype=np.float32)
     for i, ty in enumerate(t_yrs):
         cum[i, 0, 0] = -20.0 * ty
         cum[i, 0, 1] = 15.0 * ty
-    cum[:2, 1, 0] = np.nan  # Only 2 valid dates (< min_dates=3) -> must be NaN
+    cum[:2, 1, 0] = np.nan
 
     rate = fit_robust_linear_rate_mm_yr(dates, cum, min_dates=3)
     assert np.isclose(rate[0, 0], -20.0, atol=0.2)
@@ -337,13 +348,6 @@ def test_gunw_los_vertical_and_robust_rate() -> None:
 
 def test_goff_velocity_and_3857_reproject(tmp_path: Path) -> None:
     """Verify GOFF velocity vector calculation and linear-before-dB EPSG:3857 reprojection."""
-    from nisar_pipeline.export_web import (
-        export_velocity_vectors_geojson,
-        reproject_array_to_3857,
-    )
-    from nisar_pipeline.goff import compute_velocity_vectors
-
-    # Zero slant-range offset, +12 m along-track offset over 36.525 days (0.1 yr) -> 120 m/yr along heading
     sr_off = np.zeros((4, 4), dtype=np.float32)
     az_off = np.full((4, 4), 12.0, dtype=np.float32)
     vel = compute_velocity_vectors(
@@ -367,7 +371,6 @@ def test_goff_velocity_and_3857_reproject(tmp_path: Path) -> None:
     )
     assert geojson_out.exists()
 
-    # Reproject linear power to EPSG:3857 first, then convert to dB
     lin_power = np.full((8, 8), 0.10, dtype=np.float32)
     x8 = 300000.0 + np.arange(8, dtype=np.float64) * 80.0
     y8 = 3420000.0 - np.arange(8, dtype=np.float64) * 80.0
@@ -377,3 +380,48 @@ def test_goff_velocity_and_3857_reproject(tmp_path: Path) -> None:
     finite_db = warped_db[np.isfinite(warped_db)]
     assert finite_db.size > 0
     assert np.allclose(finite_db, -10.0, atol=1e-2)
+
+
+def test_dual_frequency_rgb_and_human_plots(tmp_path: Path) -> None:
+    """
+    Verify simultaneous Frequency A (0.25) and Frequency B (0.125) extraction,
+    +3.01 dB dual-frequency difference, RGB composite COG/tile export, and plot generation.
+    """
+    h5 = _create_synthetic_gcov_h5(
+        epsg=32611, ny=40, nx=40, include_hv=True, include_freq_b=True
+    )
+    tr = Transformer.from_crs(32611, 4326, always_xy=True)
+    w, s = tr.transform(348000.0 - 5.0, 3776000.0 - 30 * 20.0 - 5.0)
+    e, n = tr.transform(348000.0 + 30 * 20.0 + 5.0, 3776000.0 + 5.0)
+
+    win = load_gcov_window(
+        h5, [w, s, e, n], looks=2, date_str="20260301", file_name="dual_freq_test.h5"
+    )
+    h5.close()
+
+    assert win.has_dual_pol is True
+    assert win.has_dual_freq is True
+    assert win.freq_a_mhz == 1240.0
+    assert win.freq_b_mhz == 1290.0
+
+    prod = compute_single_date_products(win)
+    freq_diff = prod["layers"]["freq_diff_db"]
+    valid_diff = freq_diff[np.isfinite(freq_diff)]
+    assert valid_diff.size > 0
+    # 10*log10(0.25) - 10*log10(0.125) = +3.0103 dB
+    assert np.allclose(valid_diff, 10.0 * np.log10(2.0), atol=1e-3)
+
+    rgb_cog = write_rgb_cog(
+        prod["rgb"], win.x, win.y, win.epsg, tmp_path / "rgb_composite.tif"
+    )
+    assert rgb_cog.exists()
+
+    tile_count = export_rgb_xyz_png_tiles(
+        prod["rgb"], win.x, win.y, win.epsg, tmp_path / "tiles_rgb", zoom_levels=(11,)
+    )
+    assert tile_count >= 1
+
+    explorer_png = plot_pol_and_freq_explorer(
+        win=win, prod=prod, site_out_dir=tmp_path, site_title="Synthetic Test Site"
+    )
+    assert explorer_png.exists()

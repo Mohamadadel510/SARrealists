@@ -3,7 +3,7 @@ HDF5 dataset path constants for NISAR L2/L3 products (GCOV, GUNW, GOFF, SME2).
 
 All paths below have been verified against live ASF DAAC NISAR granules via
 `run_site.py inspect`. Any unverified path passed to `require_verified_layer()`
-will still fail immediately with a RuntimeError.
+will fail immediately with a RuntimeError.
 """
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ from typing import Dict
 IDENTIFICATION_GROUP: str = "/science/LSAR/identification"  # VERIFIED
 
 # ---------------------------------------------------------------------------
-# L2 GCOV (Geocoded Polarimetric Covariance) - VERIFIED
+# L2 GCOV (Geocoded Polarimetric Covariance) - VERIFIED (Frequency A & B)
 # ---------------------------------------------------------------------------
+GCOV_GRIDS_ROOT: str = "/science/LSAR/GCOV/grids"  # VERIFIED
 GCOV_GRID_GROUP: str = "/science/LSAR/GCOV/grids/frequencyA"  # VERIFIED
+GCOV_GRID_GROUP_B: str = "/science/LSAR/GCOV/grids/frequencyB"  # VERIFIED
 GCOV_HHHH: str = f"{GCOV_GRID_GROUP}/HHHH"  # VERIFIED
 GCOV_HVHV: str = f"{GCOV_GRID_GROUP}/HVHV"  # VERIFIED
 GCOV_VVVV: str = f"{GCOV_GRID_GROUP}/VVVV"  # VERIFIED
@@ -26,6 +28,8 @@ GCOV_MASK: str = f"{GCOV_GRID_GROUP}/mask"  # VERIFIED
 GCOV_X: str = f"{GCOV_GRID_GROUP}/xCoordinates"  # VERIFIED
 GCOV_Y: str = f"{GCOV_GRID_GROUP}/yCoordinates"  # VERIFIED
 GCOV_PROJECTION: str = f"{GCOV_GRID_GROUP}/projection"  # VERIFIED
+GCOV_CENTER_FREQ_A: str = f"{GCOV_GRID_GROUP}/centerFrequency"  # VERIFIED
+GCOV_CENTER_FREQ_B: str = f"{GCOV_GRID_GROUP_B}/centerFrequency"  # VERIFIED
 GCOV_INCIDENCE_ANGLE: str = (
     "/science/LSAR/GCOV/metadata/radarGrid/incidenceAngle"  # VERIFIED
 )
@@ -131,7 +135,9 @@ SME2_PROJECTION: str = f"{SME2_GRID_GROUP}/projection"  # VERIFIED (EPSG:6933)
 # ---------------------------------------------------------------------------
 VERIFIED_LAYERS: Dict[str, bool] = {
     # GCOV
+    GCOV_GRIDS_ROOT: True,
     GCOV_GRID_GROUP: True,
+    GCOV_GRID_GROUP_B: True,
     GCOV_HHHH: True,
     GCOV_HVHV: True,
     GCOV_VVVV: True,
@@ -140,6 +146,8 @@ VERIFIED_LAYERS: Dict[str, bool] = {
     GCOV_X: True,
     GCOV_Y: True,
     GCOV_PROJECTION: True,
+    GCOV_CENTER_FREQ_A: True,
+    GCOV_CENTER_FREQ_B: True,
     GCOV_INCIDENCE_ANGLE: True,
     # GUNW
     GUNW_GRID_GROUP: True,
