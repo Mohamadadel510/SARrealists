@@ -2,9 +2,11 @@
 Human-understandable radar visualization and diagnostics module:
 1. Plain-English legend descriptors with technical units ([dB], [mm/yr]) in brackets
 2. `enrich_catalog_with_human_labels`: embeds plain-English legend stops into catalog.json
-3. `plot_pol_and_freq_explorer`: 6-panel figure comparing HH Co-Pol, HV Cross-Pol,
+3. `plot_monthly_phenomenon_png`: saves a fast standalone monthly PNG image for any
+   required phenomenon layer (`out/<site>/plots/monthly/<layer>/<YYYYMMDD>.png`)
+4. `plot_pol_and_freq_explorer`: 6-panel figure comparing HH Co-Pol, HV Cross-Pol,
    Polarimetric RGB Composite, Frequency A, Frequency B, and Dual-Frequency Difference (A - B)
-4. `plot_human_friendly_guide`: 6-panel site summary dashboard from built COGs, GeoJSONs,
+5. `plot_human_friendly_guide`: 6-panel site summary dashboard from built COGs, GeoJSONs,
    and `points.json` with plain-English colorbar labels
 """
 from __future__ import annotations
@@ -12,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +25,6 @@ from nisar_pipeline.window import GCOVWindow
 
 logger = logging.getLogger(__name__)
 
-# Plain-English interpretation guide with technical values in brackets
 HUMAN_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
     "hh_db": {
         "friendly_title": "Surface Roughness & Moisture (HH Co-Pol)",
@@ -39,7 +40,7 @@ HUMAN_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "hv_db": {
-        "friendly_title": "Cross-Pol Backscatter: Crop Volume & Rotated Structures (HV)",
+        "friendly_title": "Cross-Pol Backscatter: Crop Volume & Structures (HV)",
         "what_it_shows": "Dark = Water / Bare Sand | Mid Green = Irrigated Crops | Darkest Green = Orchards & Rotated Village Buildings",
         "vmin": -30.0,
         "vmax": -8.0,
@@ -236,6 +237,64 @@ def _rgb_chw_to_rgba_hwc(rgb_chw: np.ndarray) -> np.ndarray:
     return np.concatenate([rgb_hwc, alpha], axis=-1)
 
 
+def plot_monthly_phenomenon_png(
+    arr: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    epsg: int,
+    layer_id: str,
+    date_str: str,
+    site_out_dir: Path,
+    site_title: str,
+) -> Path:
+    """
+    Save a fast standalone monthly PNG image for any phenomenon layer at:
+      `out/<site>/plots/monthly/<layer_id>/<date_str>.png`
+    Supports both 2D float32 layers and 3D `(3, H, W)` uint8 RGB composites.
+    """
+    out_png = site_out_dir / "plots" / "monthly" / layer_id / f"{date_str}.png"
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+
+    spec = HUMAN_LAYER_SPECS.get(layer_id, {})
+    friendly_title = spec.get("friendly_title", layer_id)
+    subtitle = spec.get("what_it_shows", "")
+
+    data_o, x_asc, y_desc, _ = compute_affine_and_orient(arr, x, y)
+    ext_km = [
+        float(x_asc.min()) / 1e3,
+        float(x_asc.max()) / 1e3,
+        float(y_desc.min()) / 1e3,
+        float(y_desc.max()) / 1e3,
+    ]
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6.5))
+    if data_o.ndim == 3 and data_o.shape[0] == 3:
+        rgba_hwc = _rgb_chw_to_rgba_hwc(data_o)
+        ax.imshow(rgba_hwc, extent=ext_km, origin="upper")
+    else:
+        vmin = float(spec.get("vmin", -22.0))
+        vmax = float(spec.get("vmax", 0.0))
+        cmap = str(spec.get("cmap", "viridis"))
+        im = ax.imshow(data_o, extent=ext_km, origin="upper", cmap=cmap, vmin=vmin, vmax=vmax)
+        cbar = fig.colorbar(im, ax=ax, shrink=0.82, pad=0.02)
+        if spec.get("stops"):
+            cbar.set_ticks([s[0] for s in spec["stops"]])
+            cbar.ax.set_yticklabels([s[1] for s in spec["stops"]], fontsize=8)
+
+    ax.set_title(
+        f"{friendly_title} — {date_str}\n{subtitle}",
+        fontsize=10.5,
+        fontweight="bold",
+    )
+    ax.set_xlabel(f"West <-> East Distance (km, EPSG:{epsg})")
+    ax.set_ylabel("South <-> North Distance (km)")
+    fig.suptitle(site_title, fontsize=11, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=120)
+    plt.close(fig)
+    return out_png
+
+
 def plot_pol_and_freq_explorer(
     win: GCOVWindow,
     prod: Dict[str, Any],
@@ -243,15 +302,7 @@ def plot_pol_and_freq_explorer(
     site_title: str,
 ) -> Path:
     """
-    Save a 6-panel figure (`out/<site>/plots/pol_freq_explorer_<YYYYMMDD>.png`) showing:
-      Row 1 (Polarization Comparison):
-        1. HH Co-Pol (Surface Roughness, Moisture & Buildings)
-        2. HV Cross-Pol (Crop Volume & Rotated Structures)
-        3. Combined Polarimetric RGB Composite (Transparent outside swath)
-      Row 2 (Dual-Frequency Split-Spectrum Comparison):
-        4. Frequency A High-Res Science Band (MHz & pixel spacing)
-        5. Frequency B Simultaneous 5 MHz Sub-Band (MHz & pixel spacing)
-        6. Dual-Frequency Difference (Freq A - Freq B)
+    Save a 6-panel figure (`out/<site>/plots/pol_freq_explorer_<YYYYMMDD>.png`).
     """
     plots_dir = site_out_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -330,7 +381,7 @@ def plot_pol_and_freq_explorer(
         )
         axes[0, 1].set_title("2. Cross-Pol: Not Present in Cycle", fontweight="bold")
 
-    # Panel 3: Polarimetric RGB Composite (with transparent alpha outside swath)
+    # Panel 3: Polarimetric RGB Composite
     axes[0, 2].imshow(rgba_hwc, extent=ext_km, origin="upper")
     axes[0, 2].set_title(
         "3. Polarimetric SAR RGB Composite (Urban-Filtered)\n"
@@ -503,7 +554,6 @@ def plot_human_friendly_guide(site_out_dir: Path, show_inline: bool = False) -> 
         ax.set_xlabel("West <-> East (km)")
         ax.set_ylabel("South <-> North (km)")
 
-    # Panel 4: Vectors (Glacier Velocity Arrows or Subsidence Rate) or Dual-Freq / Change
     ax_vec = ax_list[4]
     vel_geojson = site_out_dir / "vectors" / "glacier_velocity.geojson"
     sub_geojson = site_out_dir / "vectors" / "subsidence_rates.geojson"
@@ -598,7 +648,6 @@ def plot_human_friendly_guide(site_out_dir: Path, show_inline: bool = False) -> 
     else:
         ax_vec.axis("off")
 
-    # Panel 5: Point Time Series (points.json)
     ax_ts = ax_list[5]
     pts_path = site_out_dir / "timeseries" / "points.json"
     metric_labels = {
