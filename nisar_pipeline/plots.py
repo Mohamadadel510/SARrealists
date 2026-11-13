@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
 
+from nisar_pipeline.gcov import compute_affine_and_orient
 from nisar_pipeline.window import GCOVWindow
 
 logger = logging.getLogger(__name__)
@@ -39,13 +40,28 @@ HUMAN_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
     },
     "hv_db": {
         "friendly_title": "Cross-Pol Backscatter: Crop Volume & Rotated Structures (HV)",
-        "what_it_shows": "Dark = Water / Bare Sand | Mid Green = Irrigated Crops | Darkest Green = Orchards & Rotated Village Buildings (use RVI to isolate pure crops)",
-        "vmin": -30.0, "vmax": -8.0, "cmap": "YlGn",
+        "what_it_shows": "Dark = Water / Bare Sand | Mid Green = Irrigated Crops | Darkest Green = Orchards & Rotated Village Buildings",
+        "vmin": -30.0,
+        "vmax": -8.0,
+        "cmap": "YlGn",
         "stops": [
             (-30.0, "Water / Bare Soil [-30 dB]"),
             (-22.0, "Young / Sparse Crops [-22 dB]"),
             (-15.0, "Dense Irrigated Field Crops [-15 dB]"),
             (-8.0, "Orchards / Village Corner Bounce [-8 dB]"),
+        ],
+    },
+    "rvi": {
+        "friendly_title": "Radar Vegetation Health Index (Dual-Pol RVI)",
+        "what_it_shows": "Combines HH + HV to separate bare ground/cities from true crop biomass",
+        "vmin": 0.0,
+        "vmax": 1.0,
+        "cmap": "YlGn",
+        "stops": [
+            (0.0, "Bare Ground / Water / Buildings [0.0]"),
+            (0.35, "Light Vegetation [0.35]"),
+            (0.70, "Healthy Crop Cover [0.70]"),
+            (1.0, "Dense Canopy Biomass [1.0]"),
         ],
     },
     "pol_ratio_db": {
@@ -75,8 +91,8 @@ HUMAN_LAYER_SPECS: Dict[str, Dict[str, Any]] = {
         ],
     },
     "rgb_composite": {
-        "friendly_title": "Polarimetric SAR RGB Composite (R=HH, G=HV, B=RVI)",
-        "what_it_shows": "Green = Crops & Forests | Magenta/White = Cities & Bare Soil | Dark = Water",
+        "friendly_title": "Polarimetric SAR RGB Composite (Green=Crops, Magenta=Cities)",
+        "what_it_shows": "Green = Irrigated Crops & Trees | Magenta/Pink = Cities & Villages | Dark = Water",
         "vmin": 0.0,
         "vmax": 255.0,
         "cmap": "rgb",
@@ -212,6 +228,14 @@ def enrich_catalog_with_human_labels(catalog_path: Path) -> Path:
     return catalog_path
 
 
+def _rgb_chw_to_rgba_hwc(rgb_chw: np.ndarray) -> np.ndarray:
+    """Convert `(3, H, W)` uint8 array (`0` = nodata) into `(H, W, 4)` RGBA uint8 with transparent nodata."""
+    rgb_hwc = np.transpose(rgb_chw, (1, 2, 0))
+    valid = (rgb_hwc[:, :, 0] > 0) | (rgb_hwc[:, :, 1] > 0) | (rgb_hwc[:, :, 2] > 0)
+    alpha = np.where(valid, 255, 0).astype(np.uint8)[..., np.newaxis]
+    return np.concatenate([rgb_hwc, alpha], axis=-1)
+
+
 def plot_pol_and_freq_explorer(
     win: GCOVWindow,
     prod: Dict[str, Any],
@@ -222,8 +246,8 @@ def plot_pol_and_freq_explorer(
     Save a 6-panel figure (`out/<site>/plots/pol_freq_explorer_<YYYYMMDD>.png`) showing:
       Row 1 (Polarization Comparison):
         1. HH Co-Pol (Surface Roughness, Moisture & Buildings)
-        2. HV Cross-Pol (Vegetation & Canopy Volume Bounce)
-        3. Combined Polarimetric RGB Composite
+        2. HV Cross-Pol (Crop Volume & Rotated Structures)
+        3. Combined Polarimetric RGB Composite (Transparent outside swath)
       Row 2 (Dual-Frequency Split-Spectrum Comparison):
         4. Frequency A High-Res Science Band (MHz & pixel spacing)
         5. Frequency B Simultaneous 5 MHz Sub-Band (MHz & pixel spacing)
@@ -233,26 +257,30 @@ def plot_pol_and_freq_explorer(
     plots_dir.mkdir(parents=True, exist_ok=True)
     out_png = plots_dir / f"pol_freq_explorer_{win.date_str or 'latest'}.png"
 
-    hh_a_db = prod["layers"]["hh_db"]
-    hv_a_db = prod["layers"]["hv_db"]
-    freq_diff_db = prod["layers"]["freq_diff_db"]
-    hh_b_db = prod.get("hh_b_db")
-    rgb_hwc = np.transpose(prod["rgb"], (1, 2, 0))  # (H, W, 3) uint8
-    alpha = np.where(np.isfinite(hh_a_db), 255, 0).astype(np.uint8)[..., np.newaxis]
-    rgba_hwc = np.concatenate([rgb_hwc, alpha], axis=-1)
-    ax3.imshow(rgba_hwc, extent=extent_km, origin="upper", aspect="equal")
+    hh_a_db, x_asc, y_desc, _ = compute_affine_and_orient(prod["layers"]["hh_db"], win.x, win.y)
+    hv_a_db, _, _, _ = compute_affine_and_orient(prod["layers"]["hv_db"], win.x, win.y)
+    freq_diff_db, _, _, _ = compute_affine_and_orient(prod["layers"]["freq_diff_db"], win.x, win.y)
+    rgb_oriented, _, _, _ = compute_affine_and_orient(prod["rgb"], win.x, win.y)
+    rgba_hwc = _rgb_chw_to_rgba_hwc(rgb_oriented)
+
+    hh_b_raw = prod.get("hh_b_db")
+    hh_b_db = (
+        compute_affine_and_orient(hh_b_raw, win.x, win.y)[0]
+        if hh_b_raw is not None
+        else None
+    )
 
     ext_km = [
-        float(win.x.min()) / 1e3,
-        float(win.x.max()) / 1e3,
-        float(win.y.min()) / 1e3,
-        float(win.y.max()) / 1e3,
+        float(x_asc.min()) / 1e3,
+        float(x_asc.max()) / 1e3,
+        float(y_desc.min()) / 1e3,
+        float(y_desc.max()) / 1e3,
     ]
 
     fig, axes = plt.subplots(2, 3, figsize=(20, 12))
 
     # Panel 1: Co-Pol (HH/VV)
-    im0 = axes[0, 0].imshow(hh_a_db, extent=ext_km, cmap="gray", vmin=-22.0, vmax=0.0)
+    im0 = axes[0, 0].imshow(hh_a_db, extent=ext_km, origin="upper", cmap="gray", vmin=-22.0, vmax=0.0)
     c0 = fig.colorbar(im0, ax=axes[0, 0], shrink=0.8)
     c0.set_ticks([-22.0, -15.0, -8.0, 0.0])
     c0.ax.set_yticklabels(
@@ -273,21 +301,21 @@ def plot_pol_and_freq_explorer(
 
     # Panel 2: Cross-Pol (HV/VH)
     if prod["has_dual_pol"]:
-        im1 = axes[0, 1].imshow(hv_a_db, extent=ext_km, cmap="YlGn", vmin=-30.0, vmax=-8.0)
+        im1 = axes[0, 1].imshow(hv_a_db, extent=ext_km, origin="upper", cmap="YlGn", vmin=-30.0, vmax=-8.0)
         c1 = fig.colorbar(im1, ax=axes[0, 1], shrink=0.8)
         c1.set_ticks([-30.0, -22.0, -15.0, -8.0])
         c1.ax.set_yticklabels(
             [
                 "Water / Bare [-30 dB]",
-                "Low Shrubs [-22 dB]",
-                "Crops / Trees [-15 dB]",
-                "Dense Canopy [-8 dB]",
+                "Sparse Crops [-22 dB]",
+                "Irrigated Crops [-15 dB]",
+                "Orchards / Villages [-8 dB]",
             ],
             fontsize=8,
         )
         axes[0, 1].set_title(
-            f"2. {prod['cross_pol_name']} Cross-Pol: Vegetation Canopy Bounce\n"
-            "(Leaves, branches & rough ice twist the radar wave)",
+            f"2. {prod['cross_pol_name']} Cross-Pol: Crop & Structure Volume Bounce\n"
+            "(Crop leaves, orchards & rotated village blocks twist the wave)",
             fontweight="bold",
             fontsize=10,
         )
@@ -302,17 +330,17 @@ def plot_pol_and_freq_explorer(
         )
         axes[0, 1].set_title("2. Cross-Pol: Not Present in Cycle", fontweight="bold")
 
-    # Panel 3: Polarimetric RGB Composite
-    axes[0, 2].imshow(rgb_hwc, extent=ext_km)
+    # Panel 3: Polarimetric RGB Composite (with transparent alpha outside swath)
+    axes[0, 2].imshow(rgba_hwc, extent=ext_km, origin="upper")
     axes[0, 2].set_title(
-        "3. Polarimetric SAR RGB Composite (R=HH, G=HV, B=RVI)\n"
-        "Green = Vegetation | Magenta = Cities/Soil | Dark = Water",
+        "3. Polarimetric SAR RGB Composite (Urban-Filtered)\n"
+        "Green = Irrigated Crops | Magenta = Cities/Villages | Dark = Water",
         fontweight="bold",
         fontsize=10,
     )
 
     # Panel 4: Frequency A
-    im3 = axes[1, 0].imshow(hh_a_db, extent=ext_km, cmap="viridis", vmin=-22.0, vmax=0.0)
+    im3 = axes[1, 0].imshow(hh_a_db, extent=ext_km, origin="upper", cmap="viridis", vmin=-22.0, vmax=0.0)
     c3 = fig.colorbar(im3, ax=axes[1, 0], shrink=0.8)
     c3.set_ticks([-22.0, -11.0, 0.0])
     c3.ax.set_yticklabels(
@@ -328,7 +356,7 @@ def plot_pol_and_freq_explorer(
 
     # Panel 5 & 6: Frequency B and Dual-Frequency Difference (Freq A - Freq B)
     if hh_b_db is not None and np.any(np.isfinite(hh_b_db)):
-        im4 = axes[1, 1].imshow(hh_b_db, extent=ext_km, cmap="viridis", vmin=-22.0, vmax=0.0)
+        im4 = axes[1, 1].imshow(hh_b_db, extent=ext_km, origin="upper", cmap="viridis", vmin=-22.0, vmax=0.0)
         c4 = fig.colorbar(im4, ax=axes[1, 1], shrink=0.8)
         c4.set_ticks([-22.0, -11.0, 0.0])
         c4.ax.set_yticklabels(
@@ -342,7 +370,7 @@ def plot_pol_and_freq_explorer(
             fontsize=10,
         )
 
-        im5 = axes[1, 2].imshow(freq_diff_db, extent=ext_km, cmap="coolwarm", vmin=-4.0, vmax=4.0)
+        im5 = axes[1, 2].imshow(freq_diff_db, extent=ext_km, origin="upper", cmap="coolwarm", vmin=-4.0, vmax=4.0)
         c5 = fig.colorbar(im5, ax=axes[1, 2], shrink=0.8)
         c5.set_ticks([-4.0, -2.0, 0.0, 2.0, 4.0])
         c5.ax.set_yticklabels(
@@ -452,14 +480,14 @@ def plot_human_friendly_guide(site_out_dir: Path, show_inline: bool = False) -> 
             b = src.bounds
             ext_km = [b.left / 1e3, b.right / 1e3, b.bottom / 1e3, b.top / 1e3]
             if src.count == 3:
-                rgb_arr = np.transpose(src.read([1, 2, 3]), (1, 2, 0))
-                ax.imshow(rgb_arr, extent=ext_km)
+                rgba_arr = _rgb_chw_to_rgba_hwc(src.read([1, 2, 3]))
+                ax.imshow(rgba_arr, extent=ext_km, origin="upper")
             else:
                 arr = src.read(1)
                 vmin = spec.get("vmin", meta.get("color_range", [-25.0, 0.0])[0])
                 vmax = spec.get("vmax", meta.get("color_range", [-25.0, 0.0])[1])
                 cmap = spec.get("cmap", meta.get("colormap", "viridis"))
-                im = ax.imshow(arr, extent=ext_km, cmap=cmap, vmin=vmin, vmax=vmax)
+                im = ax.imshow(arr, extent=ext_km, origin="upper", cmap=cmap, vmin=vmin, vmax=vmax)
                 cbar = fig.colorbar(im, ax=ax, shrink=0.80, pad=0.02)
                 if spec.get("stops"):
                     cbar.set_ticks([s[0] for s in spec["stops"]])
@@ -555,7 +583,7 @@ def plot_human_friendly_guide(site_out_dir: Path, show_inline: bool = False) -> 
             vmin = spec.get("vmin", meta.get("color_range", [-6.0, 6.0])[0])
             vmax = spec.get("vmax", meta.get("color_range", [-6.0, 6.0])[1])
             cmap = spec.get("cmap", meta.get("colormap", "RdBu"))
-            im = ax_vec.imshow(arr, extent=ext_km, cmap=cmap, vmin=vmin, vmax=vmax)
+            im = ax_vec.imshow(arr, extent=ext_km, origin="upper", cmap=cmap, vmin=vmin, vmax=vmax)
             cbar = fig.colorbar(im, ax=ax_vec, shrink=0.80, pad=0.02)
             if spec.get("stops"):
                 cbar.set_ticks([s[0] for s in spec["stops"]])
